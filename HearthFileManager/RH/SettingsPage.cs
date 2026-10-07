@@ -36,7 +36,7 @@ namespace HearthFileManager.RH
             var sb = new StringBuilder();
             sb.Append(pt.GenerateHtmlHeader());
             sb.Append(@"
-<div class='page'>
+<div class='page page-width-medium'>
     <header class='page-header'>
         <h1><i class='fa-solid fa-gear'></i> Settings</h1>
     </header>
