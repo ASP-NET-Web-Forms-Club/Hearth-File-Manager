@@ -137,6 +137,8 @@ One builder request ("build me a page…") usually takes about 2–6 API request
 
 Hearth follows the **Pageless ASP.NET Web Forms** pattern: no `.aspx`, no ViewState, no postbacks.
 
+Main reference: [adriancs.com](https://adriancs.com/complete-architecture-reference-for-pageless-asp-net-web-forms-in-md-markdown-format)
+
 - `Global.asax.cs` routes every request in `Application_BeginRequest` with a `switch`; each feature has a page route (`/files`) and an API route (`/fileapi`)
 - **One handler per file** in `RH/` (`FilesPage.cs`, `FilesPageApi.cs`, …), and HTML is composed in C#
 - **Core logic has no `HttpContext` dependency** (`engine/FsService.cs`, `engine/Ai/*`), so it can be tested from PowerShell without IIS (see `tests/`)
