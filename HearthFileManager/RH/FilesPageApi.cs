@@ -10,7 +10,7 @@ namespace HearthFileManager.RH
     public class FilesPageApi
     {
         static HttpRequest Req => HttpContext.Current.Request;
-        static FsService Fs => new FsService(AppConfig.AppDataPath);
+        static FsService Fs => FsService.ForUser(AppSession.LoginUser);
 
         public static void HandleRequest()
         {
@@ -94,7 +94,7 @@ namespace HearthFileManager.RH
 
         static void NewFile()
         {
-            if (FsService.IsInRecycle(Path) || FsService.NormalizeRel(Path) == "") throw new FsException("Open a folder such as 'www' first.");
+            if (FsService.IsInRecycle(Path)) throw new FsException("You cannot create files in the recycle bin.");
             string rel = Fs.CreateFile(Path, Req.Form["name"] + "", "");
             ApiHelper.WriteSuccess("File created", new { Path = rel });
         }
@@ -178,7 +178,7 @@ namespace HearthFileManager.RH
             int total = int.Parse(Req.Form["total"] ?? "1");
             string uploadId = Req.Form["uploadId"];
             string dest = FsService.NormalizeRel(Req.Form["dest"]);
-            if (dest == "" || FsService.ParentOf(dest) == "") throw new FsException("Open a folder such as 'www' before uploading.");
+            if (dest == "") throw new FsException("Missing file name.");
 
             fs.AppendChunk(uploadId, index, file.InputStream, (long)cfg.MaxUploadMb * 1024 * 1024);
             if (index < total - 1) { ApiHelper.WriteSuccess("Chunk received"); return; }

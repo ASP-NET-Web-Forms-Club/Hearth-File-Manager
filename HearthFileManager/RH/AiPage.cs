@@ -6,6 +6,15 @@ namespace HearthFileManager.RH
 {
     public class AiPage
     {
+        /// <summary>"" when the user root is the main root, "alex/" when it is a sub-folder of it, null when elsewhere.</summary>
+        static string UrlPrefix(string main, string user)
+        {
+            if (string.Equals(main, user, StringComparison.OrdinalIgnoreCase)) return "";
+            string m = main.TrimEnd('\\') + "\\";
+            if (user.StartsWith(m, StringComparison.OrdinalIgnoreCase)) return user.Substring(m.Length).Replace('\\', '/') + "/";
+            return null;
+        }
+
         public static void HandleRequest()
         {
             if (!Guard.PageRequire(Perm.Ai, "ai")) return;
@@ -18,6 +27,7 @@ namespace HearthFileManager.RH
                 HasKey = !string.IsNullOrWhiteSpace(cfg.GeminiApiKey),
                 Model = cfg.GeminiModel,
                 SitePreviewUrl = cfg.SitePreviewUrl,
+                UrlPrefix = UrlPrefix(AppConfig.MainRoot(), AppConfig.UserRoot(AppSession.LoginUser)),
                 Username = AppSession.LoginUser.Username
             }) + "\n" + StaticAsset.Script("/js/components/hearth-store.js")
                + "\n" + StaticAsset.Script("/js/components/hearth-editor.js")

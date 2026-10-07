@@ -20,9 +20,10 @@
             return '<tr data-user="' + Fmt.esc(u.Username) + '">' +
                 '<td><i class="fa-solid fa-circle-user" style="color:var(--text-3);margin-right:8px"></i>' + Fmt.esc(u.Username) + (self ? '<span class="badge">you</span>' : '') + '</td>' +
                 '<td><div class="perm-tags">' + tags + '</div></td>' +
+                '<td class="root-cell">' + (u.RootProblem ? '<i class="fa-solid fa-triangle-exclamation" style="color:var(--danger)" title="' + Fmt.esc(u.RootProblem) + '"></i> ' : '') + '<code>' + Fmt.esc(u.RootDisplay) + '</code>' + (u.RootPath ? '' : ' <small>(main root)</small>') + '</td>' +
                 '<td>' + Fmt.date(u.CreatedUtc) + '</td>' +
                 '<td class="col-actions">' +
-                '<button type="button" class="btn" data-act="perms" title="Permissions"><i class="fa-solid fa-shield-halved"></i><span>Permissions</span></button> ' +
+                '<button type="button" class="btn" data-act="perms" title="Permissions and root folder"><i class="fa-solid fa-user-pen"></i><span>Edit</span></button> ' +
                 '<button type="button" class="btn" data-act="password" title="Reset password"><i class="fa-solid fa-key"></i></button> ' +
                 (self ? '' : '<button type="button" class="btn btn-danger-ghost" data-act="delete" title="Delete"><i class="fa-solid fa-trash-can"></i></button>') +
                 '</td></tr>';
@@ -46,6 +47,14 @@
         sync();
     }
 
+    /** Root folder field shared by the add and edit dialogs. */
+    function rootField(value) {
+        return '<label class="field"><span>Root folder</span>' +
+            '<input type="text" class="root-input" spellcheck="false" placeholder="(empty = main root)" value="' + Fmt.esc(value || '') + '" />' +
+            '<small>Empty = the main root. <b>alex</b> = sub-folder of the main root. <b>/App_Data/public/alex</b> = inside Hearth. ' +
+            '<b>D:\\websites\\alex-site</b> = absolute path. Both / and \\ work. The folder is created if missing.</small></label>';
+    }
+
     function readPerms(body) {
         return Array.from(body.querySelectorAll('[data-perm]')).filter(function (c) { return c.checked; }).map(function (c) { return c.getAttribute('data-perm'); });
     }
@@ -57,12 +66,13 @@
             html: '<label class="field"><span>Username</span><input type="text" id="nu-name" autocomplete="off" /></label>' +
                   '<label class="field"><span>Password (min. 8 characters)</span><input type="password" id="nu-pw1" autocomplete="new-password" /></label>' +
                   '<label class="field"><span>Repeat password</span><input type="password" id="nu-pw2" autocomplete="new-password" /></label>' +
+                  rootField('') +
                   '<p style="margin:4px 0 8px"><b>Permissions</b></p>' + permChecks(CFG.Defaults, false),
             onOpen: function (body) { wirePermChecks(body); body.querySelector('#nu-name').focus(); },
             getValue: function (state, body) {
                 var a = body.querySelector('#nu-pw1').value, b = body.querySelector('#nu-pw2').value;
                 if (a !== b) { Toast.error('The two passwords do not match.'); return null; }
-                return { username: body.querySelector('#nu-name').value.trim(), password: a, permissions: readPerms(body) };
+                return { username: body.querySelector('#nu-name').value.trim(), password: a, permissions: readPerms(body), root: body.querySelector('.root-input').value.trim() };
             }
         });
         if (!v) return;
@@ -73,15 +83,15 @@
 
     async function editPerms(name) {
         var u = users.find(function (x) { return x.Username === name; });
-        var perms = await Dialog.open({
-            title: 'Permissions for ' + name,
+        var v = await Dialog.open({
+            title: 'Edit ' + name,
             okText: 'Save',
-            html: permChecks(u.Permissions, isMe(name)),
+            html: rootField(u.RootPath) + '<p style="margin:4px 0 8px"><b>Permissions</b></p>' + permChecks(u.Permissions, isMe(name)),
             onOpen: function (body) { wirePermChecks(body); },
-            getValue: function (state, body) { return readPerms(body); }
+            getValue: function (state, body) { return { perms: readPerms(body), root: body.querySelector('.root-input').value.trim() }; }
         });
-        if (!perms) return;
-        var r = await Api.users('permissions', { username: name, permissions: perms });
+        if (!v) return;
+        var r = await Api.users('permissions', { username: name, permissions: v.perms, root: v.root });
         Toast.result(r);
         if (r.success) load();
     }

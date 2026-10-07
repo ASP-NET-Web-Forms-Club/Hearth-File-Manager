@@ -55,7 +55,7 @@ namespace HearthFileManager.RH
             }
             if (message != "") parts.Add(new JObject { ["text"] = message });
 
-            var agent = new GeminiAgent(new FsService(AppConfig.AppDataPath), cfg.GeminiApiKey, cfg.GeminiModel, cfg.GeminiRpm, cfg.SitePreviewUrl);
+            var agent = new GeminiAgent(FsService.ForUser(AppSession.LoginUser), cfg.GeminiApiKey, cfg.GeminiModel, cfg.GeminiRpm, cfg.SitePreviewUrl);
             agent.FallbackModels = cfg.GeminiFallbackModels;
             AiTask task = AiTaskManager.Start(AppSession.LoginUser.Username, agent, history, parts);
             ApiHelper.WriteSuccess("Started", new { TaskId = task.Id });
@@ -96,7 +96,7 @@ namespace HearthFileManager.RH
 
         static void Undo()
         {
-            var restored = AiUndo.Undo(new FsService(AppConfig.AppDataPath), Req.Form["undoId"]);
+            var restored = AiUndo.Undo(FsService.ForUser(AppSession.LoginUser), Req.Form["undoId"]);
             ApiHelper.WriteSuccess($"Undone. {restored.Count} item(s) restored.", restored);
         }
     }

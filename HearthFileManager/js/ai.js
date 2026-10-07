@@ -59,8 +59,9 @@
     // ------------------------------------------------------------------ rendering
 
     function siteUrlFor(path) {
-        if (!CFG.SitePreviewUrl || path.indexOf('www/') !== 0) return null;
-        return CFG.SitePreviewUrl.replace(/\/$/, '') + '/' + path.substring(4).split('/').map(encodeURIComponent).join('/');
+        // UrlPrefix: where this user's root sits inside the public site ('' or 'alex/'); null = not reachable by URL
+        if (!CFG.SitePreviewUrl || CFG.UrlPrefix === null || /^App_Data\//i.test(path)) return null;
+        return CFG.SitePreviewUrl.replace(/\/$/, '') + '/' + (CFG.UrlPrefix + path).split('/').map(encodeURIComponent).join('/');
     }
 
     function renderMessages() {

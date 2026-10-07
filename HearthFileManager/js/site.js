@@ -224,7 +224,7 @@
                         if (!r.success) { list.innerHTML = '<li>' + Fmt.esc(r.message) + '</li>'; return; }
                         var html = path ? '<li class="fp-up" data-p="' + Fmt.esc(path.split('/').slice(0, -1).join('/')) + '"><i class="fa-solid fa-arrow-turn-up"></i> Up</li>' : '';
                         r.items.forEach(function (it) {
-                            if (it.IsDir && it.Path !== 'recycle-bin') html += '<li data-p="' + Fmt.esc(it.Path) + '"><i class="fa-solid fa-folder"></i>' + Fmt.esc(it.Name) + '</li>';
+                            if (it.IsDir && it.Path.charAt(0) !== '$') html += '<li data-p="' + Fmt.esc(it.Path) + '"><i class="fa-solid fa-folder"></i>' + Fmt.esc(it.Name) + '</li>';
                         });
                         list.innerHTML = html || '<li class="fp-up">No sub-folders</li>';
                     }

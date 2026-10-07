@@ -107,6 +107,11 @@
     <Compile Include="RH\UsersPageApi.cs" />
   </ItemGroup>
   <ItemGroup>
+    <!-- App_Data skeleton only; config.json and website data are never published or committed -->
+    <Content Include="App_Data\config.sample.json" />
+    <Content Include="App_Data\readme.txt" />
+    <Content Include="App_Data\public\web.config" />
+    <Content Include="App_Data\public\App_Data\.gitkeep" />
     <None Include="packages.config" />
     <None Include="Web.Debug.config">
       <DependentUpon>Web.config</DependentUpon>
@@ -115,7 +120,11 @@
       <DependentUpon>Web.config</DependentUpon>
     </None>
   </ItemGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <Folder Include="App_Data\wwwroot\db\" />
+    <Folder Include="App_Data\wwwroot\recycle-bin\" />
+    <Folder Include="App_Data\wwwroot\www\" />
+  </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
     <VSToolsPath Condition="'$(VSToolsPath)' == ''">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)</VSToolsPath>

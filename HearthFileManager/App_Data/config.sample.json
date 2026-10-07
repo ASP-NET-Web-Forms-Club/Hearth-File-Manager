@@ -1,0 +1,25 @@
+{
+  "Users": [
+    {
+      "Username": "admin",
+      "PasswordHash": "sha256:8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+      "CreatedUtc": "2026-01-01T00:00:00Z",
+      "RootPath": "",
+      "Permissions": null
+    }
+  ],
+  "GeminiApiKey": "",
+  "GeminiModel": "gemini-3.5-flash-lite",
+  "GeminiRpm": 0,
+  "GeminiFallbackModels": [
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash"
+  ],
+  "MaxUploadMb": 500,
+  "SiteRoot": "/App_Data/public",
+  "SitePreviewUrl": "",
+  "DevAutoLogin": false
+}

@@ -40,7 +40,7 @@ namespace HearthFileManager.RH
             <button type='button' class='btn btn-primary' id='user-add'><i class='fa-solid fa-user-plus'></i><span>Add user</span></button>
         </div>
         <table class='table' id='user-table'>
-            <thead><tr><th>Username</th><th>Permissions</th><th>Created</th><th class='col-actions'></th></tr></thead>
+            <thead><tr><th>Username</th><th>Permissions</th><th>Root folder</th><th>Created</th><th class='col-actions'></th></tr></thead>
             <tbody id='user-rows'></tbody>
         </table>
     </div>

@@ -10,7 +10,7 @@ namespace HearthFileManager
         protected void Application_Start(object sender, EventArgs e)
         {
             AppConfig.AppDataPath = HostingEnvironment.MapPath("~/App_Data");
-            var fs = new FsService(AppConfig.AppDataPath);
+            var fs = new FsService(AppConfig.AppDataPath, AppConfig.MainRoot());
             fs.CleanupTemp(TimeSpan.FromDays(1));
             AppConfig.Get(); // migrates/creates config.json
         }

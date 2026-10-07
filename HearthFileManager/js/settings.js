@@ -35,6 +35,8 @@
         $('set-rpm').value = S.GeminiRpm;
         $('set-maxupload').value = S.MaxUploadMb;
         $('set-site').value = S.SitePreviewUrl || '';
+        $('set-root').value = S.SiteRoot || '/App_Data/public';
+        $('set-root-full').textContent = S.SiteRootFull || '';
         $('set-devlogin').checked = !!S.DevAutoLogin;
         $('dev-block').hidden = !S.IsLocal;
 
@@ -53,12 +55,14 @@
                 rpm: $('set-rpm').value,
                 maxupload: $('set-maxupload').value,
                 site: $('set-site').value.trim(),
+                root: $('set-root').value.trim(),
                 devlogin: $('set-devlogin').checked
             });
             Toast.result(r);
             if (r.success) {
                 $('set-key').value = '';
                 $('set-key-current').textContent = r.data.KeyMasked || 'none';
+                $('set-root-full').textContent = r.data.SiteRootFull || '';
             }
         });
     });

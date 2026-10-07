@@ -37,7 +37,18 @@ namespace HearthFileManager.RH
         {
             var items = new List<object>();
             foreach (obUser u in AppConfig.Get().Users)
-                items.Add(new { u.Username, u.CreatedUtc, Permissions = u.EffectivePermissions() });
+            {
+                string full = AppConfig.UserRoot(u);
+                items.Add(new
+                {
+                    u.Username,
+                    u.CreatedUtc,
+                    Permissions = u.EffectivePermissions(),
+                    RootPath = u.RootPath ?? "",
+                    RootDisplay = AppConfig.DisplayPath(full),
+                    RootProblem = AppConfig.RootProblem(full)
+                });
+            }
             ApiHelper.WriteJson(new { success = true, message = "Success", items });
         }
 
@@ -55,6 +66,24 @@ namespace HearthFileManager.RH
             return Perm.Normalize(JsonConvert.DeserializeObject<List<string>>(json));
         }
 
+        /// <summary>
+        /// Posted root folder for a user. Empty = main root; "alex" = sub-folder of the main root;
+        /// "/App_Data/public/alex" = relative to Hearth; "D:\sites\alex" = absolute. "/" and "\" both accepted.
+        /// Returns null and writes an error when the folder is not allowed.
+        /// </summary>
+        static string PostedRoot()
+        {
+            string root = AppConfig.NormalizePathSetting(Req.Form["root"]);
+            string full;
+            try { full = AppConfig.ResolvePath(root, AppConfig.MainRoot()); }
+            catch (Exception ex) { ApiHelper.WriteError("Invalid root folder: " + ex.Message); return null; }
+            string problem = AppConfig.RootProblem(full);
+            if (problem != null) { ApiHelper.WriteError(problem); return null; }
+            try { System.IO.Directory.CreateDirectory(full); }
+            catch (Exception ex) { ApiHelper.WriteError("Could not create the folder " + full + ": " + ex.Message); return null; }
+            return root;
+        }
+
         static void Add()
         {
             string username = (Req.Form["username"] + "").Trim();
@@ -62,7 +91,9 @@ namespace HearthFileManager.RH
             if (AppConfig.FindUser(username) != null) { ApiHelper.WriteError("That username is already taken."); return; }
             string hash = AppConfig.HashPassword(ValidPassword());
             List<string> perms = PostedPermissions();
-            AppConfig.Update(c => c.Users.Add(new obUser { Username = username, PasswordHash = hash, CreatedUtc = DateTime.UtcNow, Permissions = perms }));
+            string root = PostedRoot();
+            if (root == null) return;
+            AppConfig.Update(c => c.Users.Add(new obUser { Username = username, PasswordHash = hash, CreatedUtc = DateTime.UtcNow, Permissions = perms, RootPath = root }));
             ApiHelper.WriteSuccess("User added");
         }
 
@@ -91,8 +122,10 @@ namespace HearthFileManager.RH
                 if (!AnotherManagerExists(u.Username)) { ApiHelper.WriteError("At least one user must keep the \"Manage users\" permission."); return; }
             }
 
-            AppConfig.Update(c => { foreach (obUser x in c.Users) if (x.Username == u.Username) x.Permissions = perms; });
-            ApiHelper.WriteSuccess("Permissions saved for " + u.Username);
+            string root = PostedRoot();
+            if (root == null) return;
+            AppConfig.Update(c => { foreach (obUser x in c.Users) if (x.Username == u.Username) { x.Permissions = perms; x.RootPath = root; } });
+            ApiHelper.WriteSuccess("Saved changes for " + u.Username);
         }
 
         static void Delete()

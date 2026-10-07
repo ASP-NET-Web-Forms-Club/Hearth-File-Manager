@@ -41,6 +41,16 @@ namespace HearthFileManager.RH
             string site = (Req.Form["site"] ?? "").Trim().TrimEnd('/');
             if (site != "" && !Uri.IsWellFormedUriString(site, UriKind.Absolute)) { ApiHelper.WriteError("The website address must start with http:// or https://"); return; }
             bool isLocal = Req.IsLocal;
+
+            // main root folder: validate before saving
+            string root = AppConfig.NormalizePathSetting(Req.Form["root"]);
+            if (root == "") root = "/App_Data/public";
+            string rootFull;
+            try { rootFull = AppConfig.ResolvePath(root, AppConfig.AppRoot); }
+            catch (Exception ex) { ApiHelper.WriteError("Invalid root folder: " + ex.Message); return; }
+            string problem = AppConfig.RootProblem(rootFull);
+            if (problem != null) { ApiHelper.WriteError(problem); return; }
+            string writeProblem = new FsService(AppConfig.AppDataPath, rootFull).WriteProblem();
             bool devLogin = Req.Form["devlogin"] == "1";
 
             AppConfig.Update(c =>
@@ -50,9 +60,12 @@ namespace HearthFileManager.RH
                 c.GeminiRpm = Int("rpm", 0, 100000, c.GeminiRpm);
                 c.MaxUploadMb = Int("maxupload", 1, 4096, c.MaxUploadMb);
                 c.SitePreviewUrl = site;
+                c.SiteRoot = root;
                 if (isLocal) c.DevAutoLogin = devLogin;
             });
-            ApiHelper.WriteSuccess("Settings saved", new { KeyMasked = SettingsPage.MaskKey(AppConfig.Get().GeminiApiKey) });
+            string msg = writeProblem == null ? "Settings saved"
+                : "Settings saved, but Hearth cannot write to " + rootFull + " (" + writeProblem + "). Give the IIS app pool identity Modify permission on it.";
+            ApiHelper.WriteSuccess(msg, new { KeyMasked = SettingsPage.MaskKey(AppConfig.Get().GeminiApiKey), SiteRootFull = rootFull });
         }
 
         static void Models()

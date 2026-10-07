@@ -21,7 +21,7 @@ Add-Type -Path "$bin\HearthFileManager.dll"
 $cfg = [HearthFileManager.engine.AppConfig]::Get()
 
 New-Item -ItemType Directory -Force $AppData | Out-Null
-$fs = New-Object HearthFileManager.engine.FsService($AppData)
+$fs = New-Object HearthFileManager.engine.FsService($AppData, "$AppData\public")
 $useModel = if ($Model) { $Model } else { $cfg.GeminiModel }
 Write-Host "Model: $useModel"
 $agent = New-Object HearthFileManager.engine.Ai.GeminiAgent($fs, $cfg.GeminiApiKey, $useModel, $cfg.GeminiRpm, $cfg.SitePreviewUrl)

@@ -268,6 +268,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .perm-tag { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--surface-2); color: var(--text-2); white-space: nowrap; }
 .perm-tag.on { background: var(--ok-soft); color: var(--ok); }
 .perm-checks label { margin-bottom: 10px; }
+.root-cell code { font-size: 12px; overflow-wrap: anywhere; }
+.root-cell small { color: var(--text-3); }
+.modal { max-width: 520px; }
 .perm-checks small { display: block; color: var(--text-3); }
 .sidebar-user a.user-name { color: #fff; text-decoration: none; }
 .sidebar-user a.user-name:hover { text-decoration: underline; }

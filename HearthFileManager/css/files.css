@@ -28,6 +28,8 @@
 .page-files .fm.has-selection .tb-selection { display: flex; }
 .page-files .sel-count { font-size: 13px; color: var(--text-2); margin-right: 4px; }
 .page-files .tb-spacer { flex: 1; }
+.page-files .fm-banner { display: flex; gap: 12px; margin: 14px 24px 0; padding: 12px 16px; border-radius: 10px; background: var(--danger-soft); color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
+.page-files .fm-banner > i { color: var(--danger); margin-top: 3px; }
 /* read-only users (no "Manage files" permission): only Open / Download remain */
 .page-files .fm.read-only [data-act]:not([data-act=download]):not([data-act=open]),
 .page-files .fm.read-only .dnd-hint { display: none !important; }

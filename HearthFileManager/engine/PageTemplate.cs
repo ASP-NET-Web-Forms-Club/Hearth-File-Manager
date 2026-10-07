@@ -77,7 +77,7 @@ namespace HearthFileManager.engine
         <div class='nav-label'>Website</div>
         {MenuItem("files", "/files", "fa-folder-open", "My Files")}
         {aiItem}
-        {MenuItem("recycle", "/files#recycle-bin", "fa-trash-can", "Recycle Bin")}
+        {MenuItem("recycle", "/files#$recycle", "fa-trash-can", "Recycle Bin")}
         <div class='nav-label'>Account</div>
         {accountItem}
         {usersItem}

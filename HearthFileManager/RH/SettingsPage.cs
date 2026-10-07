@@ -27,6 +27,8 @@ namespace HearthFileManager.RH
                 Fallbacks = string.Join(", ", cfg.GeminiFallbackModels ?? new System.Collections.Generic.List<string>()),
                 cfg.MaxUploadMb,
                 cfg.SitePreviewUrl,
+                cfg.SiteRoot,
+                SiteRootFull = AppConfig.MainRoot(),
                 cfg.DevAutoLogin,
                 IsLocal = HttpContext.Current.Request.IsLocal
             }) + "\n" + StaticAsset.Script("/js/settings.js");
@@ -61,6 +63,13 @@ namespace HearthFileManager.RH
         </label>
 
         <h2><i class='fa-solid fa-globe'></i> Website</h2>
+        <label class='field'>
+            <span>Main root folder</span>
+            <input type='text' id='set-root' placeholder='/App_Data/public' spellcheck='false' />
+            <small>The folder Hearth manages: the public website that your second IIS site serves. Default <b>/App_Data/public</b> (inside Hearth).
+            Absolute paths are allowed, e.g. <b>D:\websites\</b> or <b>C:\inetpub\wwwroot</b>; both / and \ work.
+            Resolved to: <b id='set-root-full'></b></small>
+        </label>
         <label class='field'>
             <span>Public website address</span>
             <input type='url' id='set-site' placeholder='https://www.example.com' />

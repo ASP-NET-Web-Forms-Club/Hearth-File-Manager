@@ -18,7 +18,7 @@ namespace HearthFileManager.engine.Ai
     }
 
     /// <summary>
-    /// The MCP-like tools Gemini may call. All paths are relative to /App_Data/wwwroot and the
+    /// The MCP-like tools Gemini may call. All paths are relative to the user's website root and the
     /// recycle bin is off-limits; deletes go to the recycle bin. Every mutation is snapshotted for undo.
     /// </summary>
     public class AiTools
@@ -41,27 +41,27 @@ namespace HearthFileManager.engine.Ai
         public static JArray Declarations()
         {
             return new JArray(
-                Fn("list_files", "List files and folders. Paths are relative to the website storage root, e.g. 'www' or 'www/images'.",
+                Fn("list_files", "List files and folders. Paths are relative to the website root, e.g. '' (the root itself), 'images' or 'css'.",
                     Props(P("path", "string", "Folder path, '' for the root"), P("recursive", "boolean", "List all sub-folders too (max 500 entries)"))),
                 Fn("search_text", "Search text inside files (case-insensitive). Returns file path, line number and line text.",
-                    Props(P("query", "string", "Text or regex to find"), P("path", "string", "Folder to search, default 'www'"),
+                    Props(P("query", "string", "Text or regex to find"), P("path", "string", "Folder to search, default '' (whole website)"),
                           P("file_pattern", "string", "Optional file mask like '*.php'"), P("regex", "boolean", "Treat query as a regular expression")),
                     "query"),
                 Fn("read_files", "Read one or more files. Text files return their full content. Images (png, jpg, gif, webp) are shown to you as pictures.",
-                    Props(PArr("paths", "File paths to read, e.g. ['www/index.html','www/css/style.css']")), "paths"),
+                    Props(PArr("paths", "File paths to read, e.g. ['index.php','css/style.css']")), "paths"),
                 Fn("write_file", "Create a file or completely replace its content. Parent folders are created automatically. Prefer replace_in_file for small changes to big files.",
-                    Props(P("path", "string", "File path, e.g. 'www/index.html'"), P("content", "string", "The full file content")), "path", "content"),
+                    Props(P("path", "string", "File path, e.g. 'index.php' or 'about/index.html'"), P("content", "string", "The full file content")), "path", "content"),
                 Fn("replace_in_file", "Replace an exact piece of text in a file. old_text must match exactly (including spaces and line breaks) and be unique unless replace_all is true.",
                     Props(P("path", "string", "File path"), P("old_text", "string", "Exact text to find"), P("new_text", "string", "Replacement text"),
                           P("replace_all", "boolean", "Replace every occurrence")), "path", "old_text", "new_text"),
                 Fn("create_folder", "Create a folder (and any missing parent folders).",
-                    Props(P("path", "string", "Folder path, e.g. 'www/images'")), "path"),
+                    Props(P("path", "string", "Folder path, e.g. 'images'")), "path"),
                 Fn("move_path", "Move or rename a file or folder.",
                     Props(P("from", "string", "Current path"), P("to", "string", "New full path (not just the folder)")), "from", "to"),
                 Fn("delete_path", "Delete a file or folder. It is moved to the recycle bin, so the user can restore it.",
                     Props(P("path", "string", "Path to delete")), "path"),
-                Fn("sqlite_query", "Run SQL on a SQLite database file inside the 'db' folder (created if missing). Use it to create tables or inspect data for the PHP website. SELECT returns rows; other statements return affected row counts. Multiple statements separated by ; are allowed.",
-                    Props(P("database", "string", "Database file name inside 'db', e.g. 'site.db'"), P("sql", "string", "SQL to run")), "database", "sql")
+                Fn("sqlite_query", "Run SQL on a SQLite database file inside the private 'App_Data' folder of the website (created if missing). Use it to create tables or inspect data for the PHP website. SELECT returns rows; other statements return affected row counts. Multiple statements separated by ; are allowed.",
+                    Props(P("database", "string", "Database file name inside 'App_Data', e.g. 'site.db'"), P("sql", "string", "SQL to run")), "database", "sql")
             );
         }
 
@@ -119,7 +119,7 @@ namespace HearthFileManager.engine.Ai
         string Allowed(string rel)
         {
             rel = FsService.NormalizeRel(rel);
-            if (FsService.IsInRecycle(rel)) throw new FsException("The recycle-bin folder is managed by the system and is not accessible.");
+            if (FsService.IsInRecycle(rel)) throw new FsException("The recycle bin is managed by the system and is not accessible.");
             _fs.Resolve(rel);
             return rel;
         }
@@ -151,7 +151,7 @@ namespace HearthFileManager.engine.Ai
         AiToolResult SearchText(JObject a)
         {
             string query = Str(a, "query");
-            string rel = Allowed(Str(a, "path") ?? "www");
+            string rel = Allowed(Str(a, "path") ?? "");
             var hits = _fs.Search(query, rel, Str(a, "file_pattern"), Bool(a, "regex"), 150);
             var arr = new JArray();
             foreach (var h in hits) arr.Add(new JObject { ["path"] = h.Path, ["line"] = h.Line, ["text"] = h.Text });
@@ -204,7 +204,6 @@ namespace HearthFileManager.engine.Ai
             string rel = Allowed(Str(a, "path"));
             string content = Str(a, "content") ?? "";
             if (Encoding.UTF8.GetByteCount(content) > MaxWriteBytes) throw new FsException("Content too large (1 MB max per file).");
-            if (FsService.ParentOf(rel) == "" ) throw new FsException("Files must be inside a folder such as 'www' or 'db'.");
             bool existed = _fs.Exists(rel);
             _undo.Snapshot(rel);
             _fs.WriteText(rel, content);
@@ -277,7 +276,8 @@ namespace HearthFileManager.engine.Ai
             if (db == "" || db.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) throw new FsException("Invalid database name.");
             string ext = FsService.ExtOf(db);
             if (ext != "db" && ext != "sqlite" && ext != "sqlite3") db += ".db";
-            string rel = "db/" + db;
+            string rel = "App_Data/" + db;
+            Directory.CreateDirectory(_fs.Resolve("App_Data"));
             string sql = Str(a, "sql") ?? "";
 
             string head = sql.TrimStart();

@@ -6,9 +6,23 @@ packages/
 *.user
 *.suo
 
-# Runtime data – contains password hashes, the Gemini API key, sessions and user files.
-# Hearth recreates config.json (admin/admin) and the wwwroot folders on first start.
+# ---------------------------------------------------------------------------
+# App_Data: commit only the skeleton, never runtime data.
+#   kept:    config.sample.json, readme.txt, public/web.config, public/App_Data/.gitkeep
+#   ignored: config.json (API key, password hashes), sessions, recycle bin, undo, tmp,
+#            and every website file / database inside public/
+# ---------------------------------------------------------------------------
 HearthFileManager/App_Data/*
+!HearthFileManager/App_Data/config.sample.json
+!HearthFileManager/App_Data/readme.txt
+!HearthFileManager/App_Data/public/
+
+HearthFileManager/App_Data/public/*
+!HearthFileManager/App_Data/public/web.config
+!HearthFileManager/App_Data/public/App_Data/
+
+HearthFileManager/App_Data/public/App_Data/*
+!HearthFileManager/App_Data/public/App_Data/.gitkeep
 
 # PowerShell test sandbox
 tests/sandbox/

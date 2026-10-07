@@ -43,33 +43,47 @@ Give a client (or yourself) a friendly place to manage a website's files on an I
 
 ## How it works: two IIS sites, one folder tree
 
-Hearth is deployed as **two IIS websites** that share one folder:
+Hearth is deployed as **two IIS websites**. By default the website it manages lives inside Hearth's own `App_Data`:
 
 ```
-C:\inetpub\hearth\                        ← IIS site #1: Hearth File Manager (the app root)
+C:\inetpub\hearth\                     ← IIS site #1: Hearth File Manager
 │   Global.asax, Web.config, bin\, css\, js\, engine\, RH\ ...
 │
-└── App_Data\                             (never served by IIS)
-    ├── config.json                       users (PBKDF2 hashes), Gemini key & settings
-    ├── sessions.json, recycle-index.json, ai-undo\, tmp\
-    └── wwwroot\                          ← everything Hearth manages
-        ├── www\                          ← IIS site #2: the public website (HTML + PHP)
-        ├── db\                           ← SQLite databases used by the PHP site (not public)
-        └── recycle-bin\                  ← deleted items
+└── App_Data\                          (never served by IIS)
+    ├── config.json                    users, permissions, Gemini key & settings  (from config.sample.json)
+    ├── sessions.json, recycle-index.json
+    ├── recycle-bin\                   deleted items (private to Hearth)
+    ├── ai-undo\, tmp\                 AI undo snapshots, upload chunks
+    │
+    └── public\                        ← IIS site #2: the public website (HTML + PHP) = main root
+        ├── index.php, css\, images\ ...
+        ├── web.config                 second guard: blocks App_Data and *.db / *.sqlite downloads
+        └── App_Data\                  SQLite databases for the PHP site (hidden by IIS)
 ```
 
 | Path | Purpose | Served publicly? |
 |---|---|---|
-| `/` (app root) | Hearth File Manager | Yes, behind a login (e.g. `files.example.com`) |
-| `/App_Data/wwwroot/www/` | The client's website, HTML + PHP | Yes, as its own IIS site (e.g. `www.example.com`) |
-| `/App_Data/wwwroot/db/` | SQLite files for the website's PHP | No |
-| `/App_Data/wwwroot/recycle-bin/` | Deleted files and folders | No |
+| `/` (Hearth folder) | Hearth File Manager | Yes, behind a login (e.g. `files.example.com`) |
+| `/App_Data/public/` | The website, HTML + PHP | Yes, as its own IIS site (e.g. `www.example.com`) |
+| `/App_Data/public/App_Data/` | SQLite files for the website's PHP | **No.** IIS hides every `App_Data` folder by default, and the site's `web.config` blocks it too |
+| `/App_Data/recycle-bin/` | Deleted files and folders | No |
 
-Because `db/` sits **outside** the public `www/` folder, database files can't be downloaded. PHP reaches them with a relative path:
+PHP reaches the database through the file system:
 
 ```php
-$pdo = new PDO('sqlite:' . __DIR__ . '/../db/site.db');
+$pdo = new PDO('sqlite:' . __DIR__ . '/App_Data/site.db');
 ```
+
+### Root folders (main root and per-user roots)
+
+- **Main root** (*Settings → Main root folder*): default `/App_Data/public`. It can also be an absolute path such as
+  `D:\websites\` or `C:\inetpub\wwwroot`. Keeping the website **outside** the Hearth folder means a Hearth update or
+  redeploy can never touch the website's files.
+- **Per-user root** (*Users → Edit*): empty = the main root; `alex` = sub-folder of the main root;
+  `/App_Data/public/alex` = path inside Hearth; or absolute, e.g. `D:\websites\alex-site\`. Users only see their own root,
+  and their recycle bin only contains what was deleted from it.
+- Both `/` and `\` are accepted. A root may not contain the Hearth folder itself or Hearth's private folders.
+- If Hearth can't write to a root, the *My Files* page shows a warning with the permission to set.
 
 ---
 
@@ -88,26 +102,36 @@ $pdo = new PDO('sqlite:' . __DIR__ . '/../db/site.db');
 
 1. **Build** the solution in Release and publish/copy the site to the server, e.g. `C:\inetpub\hearth\`.
    Make sure `bin\x86\SQLite.Interop.dll` and `bin\x64\SQLite.Interop.dll` are included.
-2. **IIS site #1 – Hearth**
+2. **Config**: in `App_Data`, rename `config.sample.json` to `config.json`. If you skip this, Hearth creates one with `admin` / `admin` on first start.
+3. **IIS site #1 – Hearth**
    - Physical path: `C:\inetpub\hearth\`
-   - App pool: .NET CLR v4.0, Integrated pipeline
-   - Give the app pool identity **Modify** permission on `C:\inetpub\hearth\App_Data\`
+   - App pool (e.g. `Hearth`): .NET CLR v4.0, Integrated pipeline
+   - Give the app pool identity **Modify** permission on `App_Data` (and on the main root if it's elsewhere):
+     ```
+     icacls "C:\inetpub\hearth\App_Data" /grant "IIS AppPool\Hearth:(OI)(CI)M"
+     ```
    - Bind it to its own host name, e.g. `files.example.com`, with **HTTPS**
-3. **IIS site #2 – the public website**
-   - Physical path: `C:\inetpub\hearth\App_Data\wwwroot\www\`
-   - Enable PHP (FastCGI) and add `index.php` / `index.html` as default documents
-   - If PHP writes to SQLite, give this site's app pool identity **Modify** permission on `App_Data\wwwroot\db\`
+4. **IIS site #2 – the public website**
+   - Physical path: the main root, by default `C:\inetpub\hearth\App_Data\public\`
+   - Use a **separate app pool** (e.g. `ClientSite`), and set Anonymous Authentication to *Application pool identity*
+   - Enable PHP (FastCGI). `index.php` is added as a default document by the included `web.config`
+   - Give it **Read** on the site, plus **Modify** on `App_Data` inside it if PHP writes to SQLite:
+     ```
+     icacls "C:\inetpub\hearth\App_Data\public\App_Data" /grant "IIS AppPool\ClientSite:(OI)(CI)M"
+     ```
+   - Optional, recommended: set PHP `open_basedir` to the site folder, so PHP can never read Hearth's `config.json`
    - Bind it to the public host name, e.g. `www.example.com`
 
-   The `www`, `db` and `recycle-bin` folders are created automatically on first start.
-4. **Sign in** at site #1 with the default account:
+   **Shared hosting** (no `icacls`): set write permission on the folders in your hosting control panel instead.
+   The default layout usually works there with no extra setup, because ASP.NET hosts normally make `App_Data` writable.
+5. **Sign in** at site #1 with the default account:
 
    | Username | Password |
    |---|---|
    | `admin` | `admin` |
 
    **Change this password immediately** on the *Users* page.
-5. **Settings page**: paste your Gemini API key, pick a model, and enter the public website address (used for "View website" links).
+6. **Settings page**: paste your Gemini API key, pick a model, check the main root folder, and enter the public website address (used for "View website" links).
 
 > **Security note:** `App_Data/config.json` holds password hashes and your Gemini API key. IIS never serves `App_Data`, but keep it out of source control (it's in `.gitignore`).
 > Keep `"DevAutoLogin": false` on production. It is a developer convenience that only works for `localhost` requests.
@@ -136,8 +160,6 @@ One builder request ("build me a page…") usually takes about 2–6 API request
 ## Architecture (for developers)
 
 Hearth follows the **Pageless ASP.NET Web Forms** pattern: no `.aspx`, no ViewState, no postbacks.
-
-Main reference: [adriancs.com](https://adriancs.com/complete-architecture-reference-for-pageless-asp-net-web-forms-in-md-markdown-format)
 
 - `Global.asax.cs` routes every request in `Application_BeginRequest` with a `switch`; each feature has a page route (`/files`) and an API route (`/fileapi`)
 - **One handler per file** in `RH/` (`FilesPage.cs`, `FilesPageApi.cs`, …), and HTML is composed in C#

@@ -35,6 +35,11 @@ namespace HearthFileManager.engine
         public string Username { get; set; }
         public string PasswordHash { get; set; }
         public DateTime CreatedUtc { get; set; }
+        /// <summary>
+        /// The user's own root folder. Empty = the main root. A plain relative value ("alex") is inside the
+        /// main root; "/App_Data/public/alex" is relative to the Hearth folder; "D:\sites\alex" is absolute.
+        /// </summary>
+        public string RootPath { get; set; } = "";
         /// <summary>Granted permission keys (see Perm). null = all permissions (accounts created before permissions existed).</summary>
         public List<string> Permissions { get; set; }
 
@@ -55,6 +60,11 @@ namespace HearthFileManager.engine
         [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
         public List<string> GeminiFallbackModels { get; set; } = new List<string> { "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash" };
         public int MaxUploadMb { get; set; } = 500;
+        /// <summary>
+        /// Main root folder that Hearth manages (the public website). "/App_Data/public" is relative to the
+        /// Hearth folder; absolute paths such as "D:\websites\" or "C:\inetpub\wwwroot" are allowed.
+        /// </summary>
+        public string SiteRoot { get; set; } = "/App_Data/public";
         public string SitePreviewUrl { get; set; } = "";
         /// <summary>Only honoured for requests from localhost. Logs in as the first user.</summary>
         public bool DevAutoLogin { get; set; } = false;
@@ -73,7 +83,87 @@ namespace HearthFileManager.engine
         public static string AppDataPath { get; set; }
 
         public static string ConfigFile => Path.Combine(AppDataPath, "config.json");
-        public static string WwwRoot => Path.Combine(AppDataPath, "wwwroot");
+
+        /// <summary>The Hearth application folder (parent of App_Data).</summary>
+        public static string AppRoot => Path.GetDirectoryName(Path.GetFullPath(AppDataPath).TrimEnd('\\'));
+
+        /// <summary>Hearth's private folders inside App_Data; a managed root may never point into these.</summary>
+        public static readonly string[] PrivateFolders = { "recycle-bin", "ai-undo", "tmp" };
+
+        /// <summary>
+        /// Turns a configured path into an absolute folder path. Accepts "/" and "\".
+        ///   "D:\sites\x", "\\server\share"  → absolute
+        ///   "/App_Data/public", "~/x"        → relative to the Hearth folder
+        ///   "alex", "sub/alex"              → relative to relativeBase
+        ///   ""                              → relativeBase
+        /// </summary>
+        public static string ResolvePath(string value, string relativeBase)
+        {
+            string v = (value ?? "").Trim().Replace('/', '\\');
+            if (v.StartsWith("~")) v = v.Substring(1);
+            if (v.StartsWith("\\\\\\")) v = v.TrimStart('\\'); // "///x" typo → treat as app-relative
+            string full;
+            if (v.Length == 0) full = relativeBase;
+            else if ((v.Length >= 2 && v[1] == ':') || v.StartsWith("\\\\")) full = v;
+            else if (v.StartsWith("\\")) full = Path.Combine(AppRoot, v.TrimStart('\\'));
+            else full = Path.Combine(relativeBase, v);
+            full = Path.GetFullPath(full);
+            return full.Length > 3 ? full.TrimEnd('\\') : full; // keep "C:\"
+        }
+
+        /// <summary>Tidies a path setting for storage: absolute → "D:\sites\x", relative → "/App_Data/public/x" or "alex/sub".</summary>
+        public static string NormalizePathSetting(string value)
+        {
+            string v = (value ?? "").Trim();
+            if (v.Length == 0) return "";
+            bool absolute = (v.Length >= 2 && v[1] == ':') || v.StartsWith("\\\\") || v.StartsWith("//");
+            if (absolute)
+            {
+                v = v.Replace('/', '\\');
+                bool unc = v.StartsWith("\\\\");
+                string rest = unc ? v.Substring(2) : v;
+                while (rest.Contains("\\\\")) rest = rest.Replace("\\\\", "\\");
+                v = (unc ? "\\\\" : "") + rest;
+                return v.Length > 3 ? v.TrimEnd('\\') : v;
+            }
+            v = v.Replace('\\', '/');
+            while (v.Contains("//")) v = v.Replace("//", "/");
+            return v.Length > 1 ? v.TrimEnd('/') : v;
+        }
+
+        public const string DefaultSiteRoot = "/App_Data/public";
+
+        public static string MainRoot()
+        {
+            string v = Get().SiteRoot;
+            return ResolvePath(string.IsNullOrWhiteSpace(v) ? DefaultSiteRoot : v, AppRoot);
+        }
+
+        public static string UserRoot(obUser u) => ResolvePath(u?.RootPath, MainRoot());
+
+        static bool IsUnder(string path, string folder) =>
+            string.Equals(path, folder, StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith(folder.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Returns an error message if the folder must not be used as a managed root, else null.</summary>
+        public static string RootProblem(string full)
+        {
+            string appData = Path.GetFullPath(AppDataPath).TrimEnd('\\');
+            // the root must not contain Hearth itself (config.json, bin, web.config would become editable)
+            if (IsUnder(AppRoot, full)) return "This folder contains the Hearth application itself. Choose a folder such as \"/App_Data/public\" or another folder outside Hearth.";
+            foreach (string p in PrivateFolders)
+                if (IsUnder(full, Path.Combine(appData, p))) return $"\"App_Data\\{p}\" is used by Hearth itself.";
+            if (string.Equals(full, appData, StringComparison.OrdinalIgnoreCase)) return "App_Data itself cannot be the root.";
+            return null;
+        }
+
+        /// <summary>Paths for display: shown relative to the Hearth folder when inside it ("/App_Data/public/alex").</summary>
+        public static string DisplayPath(string full)
+        {
+            string app = AppRoot.TrimEnd('\\');
+            if (full.StartsWith(app + "\\", StringComparison.OrdinalIgnoreCase)) return "/" + full.Substring(app.Length + 1).Replace('\\', '/');
+            return full;
+        }
 
         public static obConfig Get()
         {

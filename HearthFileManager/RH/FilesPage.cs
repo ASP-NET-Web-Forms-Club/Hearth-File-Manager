@@ -1,5 +1,6 @@
 using System;
 using System.Text;
+using System.Web;
 using HearthFileManager.engine;
 
 namespace HearthFileManager.RH
@@ -13,6 +14,22 @@ namespace HearthFileManager.RH
             if (!Guard.PageLoggedIn()) return;
             obConfig cfg = AppConfig.Get();
 
+            // which folder this user manages, and can IIS write there? (most common setup mistake)
+            string rootFull = AppConfig.UserRoot(AppSession.LoginUser);
+            string problem = AppConfig.RootProblem(rootFull);
+            if (problem == null)
+            {
+                try { problem = FsService.ForUser(AppSession.LoginUser).WriteProblem(); }
+                catch (Exception ex) { problem = ex.Message; }
+                if (problem != null)
+                    problem = "Hearth cannot write to this folder: " + problem +
+                              " — Give the IIS application pool identity \"Modify\" permission on it (own server: icacls \"" + rootFull +
+                              "\" /grant \"IIS AppPool\\<pool name>:(OI)(CI)M\"; shared hosting: set write permission in the hosting control panel).";
+            }
+            string rootDisplay = HttpUtility.HtmlEncode(AppConfig.DisplayPath(rootFull));
+            string banner = problem == null ? "" :
+                $"<div class='fm-banner'><i class='fa-solid fa-triangle-exclamation'></i><div><b>{rootDisplay}</b><br />{HttpUtility.HtmlEncode(problem)}</div></div>";
+
             var pt = new PageTemplate { Title = "My Files", BodyClass = "page-files", ActiveMenu = "files" };
             pt.ExtraHeaderText = StaticAsset.Css("/css/files.css") + "\n" + StaticAsset.Css("/css/components/hearth-editor.css");
             pt.ExtraFooterText = PageTemplate.DataIsland("FILES_CONFIG", new
@@ -20,15 +37,17 @@ namespace HearthFileManager.RH
                 MaxUploadBytes = (long)cfg.MaxUploadMb * 1024 * 1024,
                 ChunkBytes,
                 CanEdit = AppSession.LoginUser.Has(Perm.Files),
-                SitePreviewUrl = cfg.SitePreviewUrl
+                SitePreviewUrl = cfg.SitePreviewUrl,
+                RootDisplay = AppConfig.DisplayPath(rootFull)
             }) + "\n" + StaticAsset.Script("/js/components/hearth-editor.js") + "\n" + StaticAsset.Script("/js/files.js");
 
             var sb = new StringBuilder();
             sb.Append(pt.GenerateHtmlHeader());
-            sb.Append(@"
+            sb.Append($@"
 <div class='fm' id='fm'>
+    {banner}
     <header class='fm-header'>
-        <nav class='breadcrumb' id='fm-breadcrumb'></nav>
+        <nav class='breadcrumb' id='fm-breadcrumb' title='{rootDisplay}'></nav>
         <div class='fm-search'>
             <i class='fa-solid fa-magnifying-glass'></i>
             <input type='search' id='fm-filter' placeholder='Filter this folder…' />

@@ -35,34 +35,68 @@ namespace HearthFileManager.engine
     }
 
     /// <summary>
-    /// All file-system work on /App_Data/wwwroot. Every path is relative ("www/index.html"),
-    /// resolved through Resolve() which refuses anything outside the root.
+    /// All file-system work for one root folder (the main website root, or a user's own root).
+    /// Every path is relative to that root ("index.php", "css/site.css") and goes through Resolve(),
+    /// which refuses anything outside it. The recycle bin is private to Hearth (App_Data/recycle-bin)
+    /// and appears as the virtual folder "$recycle"; each root only sees its own deleted items.
     /// HttpContext-free: used by the HTTP handlers, the Gemini tools and PowerShell tests.
     /// </summary>
     public class FsService
     {
-        public const string RecycleFolder = "recycle-bin";
-        public static readonly string[] SystemFolders = { "www", "db", RecycleFolder };
+        /// <summary>Virtual path of the recycle bin (cannot clash with a real folder name in practice).</summary>
+        public const string RecycleFolder = "$recycle";
 
         static readonly object RecycleLock = new object();
 
         public string Root { get; }
         public string AppDataPath { get; }
+        public string RecycleDir => System.IO.Path.Combine(AppDataPath, "recycle-bin");
         string RecycleIndexFile => System.IO.Path.Combine(AppDataPath, "recycle-index.json");
         public string TempPath => System.IO.Path.Combine(AppDataPath, "tmp");
 
-        public FsService(string appDataPath)
+        /// <param name="appDataPath">Hearth's App_Data (recycle bin, undo, temp).</param>
+        /// <param name="root">Absolute folder this instance manages.</param>
+        public FsService(string appDataPath, string root)
         {
             AppDataPath = System.IO.Path.GetFullPath(appDataPath);
-            Root = System.IO.Path.Combine(AppDataPath, "wwwroot");
+            Root = System.IO.Path.GetFullPath(root).TrimEnd('\\');
+            if (Root.Length == 2 && Root[1] == ':') Root += "\\";
             EnsureLayout();
+        }
+
+        /// <summary>File service for a signed-in user: their own root, or the main root.</summary>
+        public static FsService ForUser(obUser user)
+        {
+            string root = AppConfig.UserRoot(user);
+            string problem = AppConfig.RootProblem(root);
+            if (problem != null) throw new FsException("Your root folder is not allowed: " + problem);
+            return new FsService(AppConfig.AppDataPath, root);
         }
 
         public void EnsureLayout()
         {
-            foreach (string f in SystemFolders) Directory.CreateDirectory(System.IO.Path.Combine(Root, f));
+            Directory.CreateDirectory(RecycleDir);
             Directory.CreateDirectory(TempPath);
+            try { Directory.CreateDirectory(Root); } catch { /* reported by CanWrite() */ }
         }
+
+        /// <summary>Checks that the IIS identity can create files in the root. Returns null when OK.</summary>
+        public string WriteProblem()
+        {
+            try
+            {
+                if (!Directory.Exists(Root)) return "The folder does not exist and could not be created.";
+                string probe = System.IO.Path.Combine(Root, ".hearth-write-test-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                File.WriteAllText(probe, "ok");
+                File.Delete(probe);
+                return null;
+            }
+            catch (Exception ex) { return ex.Message; }
+        }
+
+        static bool IsUnder(string path, string folder) =>
+            string.Equals(path, folder, StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith(folder.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
 
         // ------------------------------------------------------------------ paths
 
@@ -73,29 +107,41 @@ namespace HearthFileManager.engine
             return rel.Trim('/');
         }
 
-        /// <summary>Relative path → absolute path, guaranteed to be inside Root.</summary>
+        /// <summary>Relative path → absolute path, guaranteed to be inside Root (or inside the recycle bin for "$recycle/...").</summary>
         public string Resolve(string rel)
         {
             rel = NormalizeRel(rel);
             if (rel.IndexOf(':') >= 0 || rel.IndexOf('\0') >= 0) throw new FsException("Invalid path: " + rel);
-            string full = System.IO.Path.GetFullPath(System.IO.Path.Combine(Root, rel.Replace('/', '\\')));
-            if (!string.Equals(full, Root, StringComparison.OrdinalIgnoreCase) &&
-                !full.StartsWith(Root + "\\", StringComparison.OrdinalIgnoreCase))
+
+            string baseDir = Root, sub = rel;
+            if (IsInRecycle(rel))
+            {
+                baseDir = RecycleDir;
+                sub = rel.Length > RecycleFolder.Length ? rel.Substring(RecycleFolder.Length + 1) : "";
+                // only this root's own deleted items are reachable
+                string top = sub.Split('/')[0];
+                if (top.Length > 0 && !OwnsRecycleItem(top)) throw new FsException("Not found in your recycle bin: " + top);
+            }
+            string full = System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, sub.Replace('/', '\\')));
+            if (!IsUnder(full, baseDir))
                 throw new FsException("Path is outside the website folder: " + rel);
-            return full;
+            return full.Length > 3 ? full.TrimEnd('\\') : full;
         }
 
         public string ToRel(string full)
         {
-            if (full.Length <= Root.Length) return "";
-            return full.Substring(Root.Length + 1).Replace('\\', '/');
+            if (IsUnder(full, RecycleDir))
+                return full.Length <= RecycleDir.Length ? RecycleFolder : RecycleFolder + "/" + full.Substring(RecycleDir.Length + 1).Replace('\\', '/');
+            string root = Root.TrimEnd('\\');
+            if (full.Length <= root.Length) return "";
+            return full.Substring(root.Length + 1).Replace('\\', '/');
         }
 
+        /// <summary>The root itself and the recycle bin folder cannot be renamed, moved or deleted.</summary>
         public static bool IsSystemFolder(string rel)
         {
             rel = NormalizeRel(rel);
-            foreach (string f in SystemFolders) if (string.Equals(rel, f, StringComparison.OrdinalIgnoreCase)) return true;
-            return false;
+            return rel.Length == 0 || rel.Equals(RecycleFolder, StringComparison.OrdinalIgnoreCase);
         }
 
         public static bool IsInRecycle(string rel)
@@ -114,8 +160,8 @@ namespace HearthFileManager.engine
 
         void GuardSystem(string rel, string verb)
         {
-            if (NormalizeRel(rel).Length == 0 || IsSystemFolder(rel))
-                throw new FsException($"The folder '{NormalizeRel(rel)}' is a system folder and cannot be {verb}.");
+            if (IsSystemFolder(rel))
+                throw new FsException(NormalizeRel(rel).Length == 0 ? $"The root folder cannot be {verb}." : $"The recycle bin cannot be {verb}.");
         }
 
         // ------------------------------------------------------------------ listing
@@ -159,10 +205,11 @@ namespace HearthFileManager.engine
 
             var list = new List<obFsItem>();
             var di = new DirectoryInfo(full);
+            // at the top of the recycle bin, show only items deleted from inside this root
             foreach (DirectoryInfo d in di.GetDirectories())
-                list.Add(Describe(d, idx));
+                if (idx == null || idx.ContainsKey(d.Name) && Owns(idx[d.Name])) list.Add(Describe(d, idx));
             foreach (FileInfo f in di.GetFiles())
-                list.Add(Describe(f, idx));
+                if (idx == null || idx.ContainsKey(f.Name) && Owns(idx[f.Name])) list.Add(Describe(f, idx));
             list.Sort((a, b) => a.IsDir != b.IsDir ? (a.IsDir ? -1 : 1) : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
             return list;
         }
@@ -182,7 +229,7 @@ namespace HearthFileManager.engine
                 Kind = isDir ? "folder" : KindOf(ext)
             };
             obRecycleEntry e;
-            if (idx != null && idx.TryGetValue(fsi.Name, out e)) { item.OriginalPath = e.OriginalPath; item.DeletedBy = e.DeletedBy; }
+            if (idx != null && idx.TryGetValue(fsi.Name, out e)) { item.OriginalPath = ToRel(e.OriginalPath); item.DeletedBy = e.DeletedBy; }
             return item;
         }
 
@@ -363,6 +410,7 @@ namespace HearthFileManager.engine
 
             if (IsInRecycle(rel))
             {
+                if (ParentOf(rel) != RecycleFolder) throw new FsException("Delete the whole item from the recycle bin, or restore it first.");
                 if (Directory.Exists(full)) Directory.Delete(full, true); else File.Delete(full);
                 lock (RecycleLock)
                 {
@@ -377,28 +425,31 @@ namespace HearthFileManager.engine
             string binName = $"{flat}.{actor}.{stamp}";
             lock (RecycleLock)
             {
-                string binRel = Combine(RecycleFolder, binName);
+                string target = System.IO.Path.Combine(RecycleDir, binName);
                 int n = 1;
-                while (Exists(binRel)) binRel = Combine(RecycleFolder, $"{binName}-{n++}");
-                MoveRaw(full, Resolve(binRel), false);
+                while (File.Exists(target) || Directory.Exists(target)) target = System.IO.Path.Combine(RecycleDir, $"{binName}-{n++}");
+                MoveRaw(full, target, false);
 
                 var idx = LoadRecycleIndex();
-                idx[NameOf(binRel)] = new obRecycleEntry { OriginalPath = NormalizeRel(rel), DeletedUtc = DateTime.UtcNow, DeletedBy = actor };
+                // absolute original path: the recycle bin is shared by all roots
+                idx[System.IO.Path.GetFileName(target)] = new obRecycleEntry { OriginalPath = full, DeletedUtc = DateTime.UtcNow, DeletedBy = actor };
                 SaveRecycleIndex(idx);
-                return binRel;
+                return ToRel(target);
             }
         }
 
         /// <summary>Restores a recycle-bin item to its original place (or a unique sibling name if taken).</summary>
         public string Restore(string binRel)
         {
-            if (!IsInRecycle(binRel) || IsSystemFolder(binRel)) throw new FsException("Only items in the recycle bin can be restored.");
+            binRel = NormalizeRel(binRel);
+            if (!IsInRecycle(binRel) || IsSystemFolder(binRel) || ParentOf(binRel) != RecycleFolder)
+                throw new FsException("Only items in the recycle bin can be restored.");
             lock (RecycleLock)
             {
                 var idx = LoadRecycleIndex();
                 obRecycleEntry e;
-                if (!idx.TryGetValue(NameOf(binRel), out e)) throw new FsException("The original location of this item is unknown. Move it manually instead.");
-                string dest = UniqueName(e.OriginalPath);
+                if (!idx.TryGetValue(NameOf(binRel), out e) || !Owns(e)) throw new FsException("The original location of this item is unknown. Move it manually instead.");
+                string dest = UniqueName(ToRel(e.OriginalPath));
                 string destFull = Resolve(dest);
                 Directory.CreateDirectory(System.IO.Path.GetDirectoryName(destFull));
                 MoveRaw(Resolve(binRel), destFull, false);
@@ -408,14 +459,35 @@ namespace HearthFileManager.engine
             }
         }
 
+        /// <summary>Permanently deletes this root's items in the recycle bin (other roots' items are kept).</summary>
         public int EmptyRecycleBin()
         {
             int n = 0;
-            string bin = Resolve(RecycleFolder);
-            foreach (string d in Directory.GetDirectories(bin)) { Directory.Delete(d, true); n++; }
-            foreach (string f in Directory.GetFiles(bin)) { File.Delete(f); n++; }
-            lock (RecycleLock) SaveRecycleIndex(new Dictionary<string, obRecycleEntry>());
+            lock (RecycleLock)
+            {
+                var idx = LoadRecycleIndex();
+                foreach (var kv in new List<KeyValuePair<string, obRecycleEntry>>(idx))
+                {
+                    if (!Owns(kv.Value)) continue;
+                    string p = System.IO.Path.Combine(RecycleDir, kv.Key);
+                    if (Directory.Exists(p)) Directory.Delete(p, true);
+                    else if (File.Exists(p)) File.Delete(p);
+                    idx.Remove(kv.Key);
+                    n++;
+                }
+                SaveRecycleIndex(idx);
+            }
             return n;
+        }
+
+        /// <summary>A recycle entry belongs to this root when it was deleted from inside it.</summary>
+        bool Owns(obRecycleEntry e) => e != null && !string.IsNullOrEmpty(e.OriginalPath) &&
+                                       System.IO.Path.IsPathRooted(e.OriginalPath) && IsUnder(e.OriginalPath, Root);
+
+        bool OwnsRecycleItem(string name)
+        {
+            obRecycleEntry e;
+            return LoadRecycleIndex().TryGetValue(name, out e) && Owns(e);
         }
 
         Dictionary<string, obRecycleEntry> LoadRecycleIndex()

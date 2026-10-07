@@ -11,10 +11,11 @@
         archive: 'fa-file-zipper', doc: 'fa-file-pdf', audio: 'fa-file-audio', video: 'fa-file-video',
         database: 'fa-database', font: 'fa-font', other: 'fa-file'
     };
-    var SYSTEM = { 'www': 'public website', 'db': 'databases', 'recycle-bin': 'deleted items' };
+    var RECYCLE = '$recycle';   // virtual path of the recycle bin
+    var SYSTEM = { 'App_Data': 'private · databases', 'web.config': 'IIS settings' };
 
     var S = {
-        path: 'www',
+        path: '',
         items: [],
         isRecycle: false,
         sel: new Set(),
@@ -33,7 +34,7 @@
         var r = await Api.get('/fileapi', 'list', { path: path });
         if (!r.success) {
             Toast.error(r.message);
-            if (path !== 'www') navigate('www');
+            if (path !== '') navigate('');
             return;
         }
         S.path = r.data.Path;
@@ -60,11 +61,12 @@
 
     function renderCrumbs() {
         var parts = S.path ? S.path.split('/') : [];
-        var html = '<a href="#" data-path="" data-drop="1"><i class="fa-solid fa-house"></i></a>';
+        var html = '<a href="#" data-path="" data-drop="1" title="' + Fmt.esc(CFG.RootDisplay || '') + '"><i class="fa-solid fa-house"></i></a>';
         var acc = '';
         parts.forEach(function (p) {
             acc = acc ? acc + '/' + p : p;
-            html += '<span class="sep"><i class="fa-solid fa-chevron-right"></i></span><a href="#' + Fmt.esc(acc) + '" data-path="' + Fmt.esc(acc) + '" data-drop="1">' + Fmt.esc(p) + '</a>';
+            var text = acc === RECYCLE ? 'Recycle Bin' : p;
+            html += '<span class="sep"><i class="fa-solid fa-chevron-right"></i></span><a href="#' + Fmt.esc(acc) + '" data-path="' + Fmt.esc(acc) + '"' + (acc === RECYCLE ? '' : ' data-drop="1"') + '>' + Fmt.esc(text) + '</a>';
         });
         el.crumbs.innerHTML = html;
     }
@@ -411,7 +413,6 @@
 
     /** files: [{ file: File, rel: 'sub/folder/name.ext' }] uploaded into folder `dest`. */
     function enqueue(files, dest) {
-        if (!dest) { Toast.error('Open a folder such as "www" first, then upload.'); return; }
         if (FsIsRecycle(dest)) { Toast.error('You cannot upload into the recycle bin.'); return; }
         files.forEach(function (f) {
             if (f.file.size > CFG.MaxUploadBytes) { Toast.error(f.file.name + ' is larger than the ' + Fmt.size(CFG.MaxUploadBytes) + ' limit.'); return; }
@@ -419,14 +420,14 @@
             li.innerHTML = '<div class="up-top"><span class="up-name"></span><span class="up-status">Waiting</span></div><div class="up-bar"><span></span></div>';
             li.querySelector('.up-name').textContent = f.rel;
             el.upList.appendChild(li);
-            queue.push({ file: f.file, dest: dest + '/' + f.rel, li: li });
+            queue.push({ file: f.file, dest: (dest ? dest + '/' : '') + f.rel, li: li });
         });
         el.upPanel.classList.add('open');
         updateUploadTitle();
         if (!uploading) runQueue();
     }
 
-    function FsIsRecycle(p) { return p === 'recycle-bin' || p.indexOf('recycle-bin/') === 0; }
+    function FsIsRecycle(p) { return p === RECYCLE || p.indexOf(RECYCLE + '/') === 0; }
 
     function updateUploadTitle() {
         var left = queue.length + (uploading ? 1 : 0);
@@ -725,6 +726,6 @@
         document.querySelectorAll('[data-view]').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === S.view); });
         wire();
         wireDragDrop();
-        load(location.hash.length > 1 ? decodeURIComponent(location.hash.slice(1)) : 'www');
+        load(location.hash.length > 1 ? decodeURIComponent(location.hash.slice(1)) : '');
     });
 })();

@@ -22,6 +22,12 @@ namespace HearthFileManager.engine.Ai
             public string Backup { get; set; }
         }
 
+        class Manifest
+        {
+            public string Root { get; set; }
+            public List<Entry> Entries { get; set; }
+        }
+
         readonly FsService _fs;
         readonly string _dir;
         readonly List<Entry> _entries = new List<Entry>();
@@ -76,7 +82,8 @@ namespace HearthFileManager.engine.Ai
                 FsService.CopyDir(full, Path.Combine(_dir, entry.Backup));
             }
             _entries.Add(entry);
-            File.WriteAllText(Path.Combine(_dir, "manifest.json"), JsonConvert.SerializeObject(_entries, Formatting.Indented), new UTF8Encoding(false));
+            var manifest = new Manifest { Root = _fs.Root, Entries = _entries };
+            File.WriteAllText(Path.Combine(_dir, "manifest.json"), JsonConvert.SerializeObject(manifest, Formatting.Indented), new UTF8Encoding(false));
         }
 
         /// <summary>Restores all paths touched in a turn. Returns the list of restored paths.</summary>
@@ -88,7 +95,11 @@ namespace HearthFileManager.engine.Ai
             string manifest = Path.Combine(dir, "manifest.json");
             if (!File.Exists(manifest)) throw new FsException("This change can no longer be undone (it was already undone or is too old).");
 
-            var entries = JsonConvert.DeserializeObject<List<Entry>>(File.ReadAllText(manifest, Encoding.UTF8));
+            var m = JsonConvert.DeserializeObject<Manifest>(File.ReadAllText(manifest, Encoding.UTF8));
+            // paths are relative to the root the AI worked in; refuse if this user's root is different
+            if (!string.Equals(m.Root, fs.Root, StringComparison.OrdinalIgnoreCase))
+                throw new FsException("This change was made in a different root folder, so it can't be undone from here.");
+            var entries = m.Entries;
             var restored = new List<string>();
             // reverse order so later snapshots (children) are handled before parents
             for (int i = entries.Count - 1; i >= 0; i--)

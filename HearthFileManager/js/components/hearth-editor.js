@@ -3,9 +3,9 @@
    auto-indent, Ctrl+S). No dependencies besides site.js (Api, Toast, Dialog).
 
    One-liners:
-     HearthEditor.open('www/index.html');                    // full-screen editor for a server file
-     HearthEditor.open('www/a.css', { onSaved: reload });    // with a callback
-     HearthEditor.open('www/a.css', { readOnly: true });     // view only (no Save)
+     HearthEditor.open('index.php');                    // full-screen editor for a server file
+     HearthEditor.open('css/site.css', { onSaved: reload });    // with a callback
+     HearthEditor.open('css/site.css', { readOnly: true });     // view only (no Save)
    Embedded:
      var ed = new HearthEditor(mountEl, { value: '...', onSave: function (text) {...} });
      ed.getValue(); ed.setValue('x'); ed.destroy();
