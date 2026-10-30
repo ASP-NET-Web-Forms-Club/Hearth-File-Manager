@@ -42,6 +42,8 @@ namespace HearthFileManager.engine
         public string RootPath { get; set; } = "";
         /// <summary>Granted permission keys (see Perm). null = all permissions (accounts created before permissions existed).</summary>
         public List<string> Permissions { get; set; }
+        /// <summary>Per-user override for file manager center width: "" (use system default), "100%", "900px", or custom e.g. "1200px".</summary>
+        public string FilesWidth { get; set; } = "";
 
         public bool Has(string perm) => Permissions == null || Perm.Normalize(Permissions).Contains(perm);
 
@@ -66,6 +68,8 @@ namespace HearthFileManager.engine
         /// </summary>
         public string SiteRoot { get; set; } = "/App_Data/public";
         public string SitePreviewUrl { get; set; } = "";
+        /// <summary>Global default center width for the file manager: "100%" (default), "900px", or custom e.g. "1200px".</summary>
+        public string FilesWidth { get; set; } = "100%";
         /// <summary>Only honoured for requests from localhost. Logs in as the first user.</summary>
         public bool DevAutoLogin { get; set; } = false;
     }
@@ -141,6 +145,44 @@ namespace HearthFileManager.engine
 
         public static string UserRoot(obUser u) => ResolvePath(u?.RootPath, MainRoot());
 
+        /// <summary>
+        /// Normalizes a file manager display width setting.
+        /// Accepts "100%", "900px", custom pixels ("1200" or "1200px", clamped 500..3840), or custom percentage ("80%", clamped 40..100).
+        /// When allowEmpty is true, "" means "inherit system default".
+        /// </summary>
+        public static string NormalizeFilesWidth(string value, bool allowEmpty = false)
+        {
+            string v = (value ?? "").Trim().ToLowerInvariant();
+            if (v.Length == 0 || v == "default" || v == "system") return allowEmpty ? "" : "100%";
+            if (v == "100%" || v == "full") return "100%";
+            if (v == "900px" || v == "900") return "900px";
+            if (v.EndsWith("%"))
+            {
+                int pct;
+                if (int.TryParse(v.Substring(0, v.Length - 1).Trim(), out pct))
+                {
+                    pct = Math.Max(40, Math.Min(100, pct));
+                    return pct == 100 ? "100%" : pct + "%";
+                }
+            }
+            if (v.EndsWith("px")) v = v.Substring(0, v.Length - 2).Trim();
+            int px;
+            if (int.TryParse(v, out px))
+            {
+                px = Math.Max(500, Math.Min(3840, px));
+                return px + "px";
+            }
+            return allowEmpty ? "" : "100%";
+        }
+
+        /// <summary>Effective file manager center width for a user (user override if set, else system default).</summary>
+        public static string EffectiveFilesWidth(obUser u)
+        {
+            string userW = NormalizeFilesWidth(u?.FilesWidth, true);
+            if (!string.IsNullOrEmpty(userW)) return userW;
+            return NormalizeFilesWidth(Get().FilesWidth, false);
+        }
+
         static bool IsUnder(string path, string folder) =>
             string.Equals(path, folder, StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith(folder.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
@@ -157,12 +199,37 @@ namespace HearthFileManager.engine
             return null;
         }
 
-        /// <summary>Paths for display: shown relative to the Hearth folder when inside it ("/App_Data/public/alex").</summary>
+        /// <summary>
+        /// Paths for the UI. Inside Hearth → "/App_Data/public/alex". Anywhere else (only possible via
+        /// config.json) → masked to the last folder name, "…\alex-site", so server paths are never disclosed.
+        /// </summary>
         public static string DisplayPath(string full)
         {
             string app = AppRoot.TrimEnd('\\');
             if (full.StartsWith(app + "\\", StringComparison.OrdinalIgnoreCase)) return "/" + full.Substring(app.Length + 1).Replace('\\', '/');
-            return full;
+            string name = Path.GetFileName(full.TrimEnd('\\'));
+            return "…\\" + (string.IsNullOrEmpty(name) ? "" : name);
+        }
+
+        /// <summary>True for values that point anywhere on disk ("D:\x", "\\server\x"). Only config.json may set these.</summary>
+        public static bool IsAbsoluteSetting(string value)
+        {
+            string v = (value ?? "").Trim().Replace('/', '\\');
+            return (v.Length >= 2 && v[1] == ':') || v.StartsWith("\\\\");
+        }
+
+        public static string PublicRoot => ResolvePath(DefaultSiteRoot, AppRoot);
+
+        /// <summary>
+        /// Validates a root folder entered in the UI: it must be the main root, /App_Data/public, or a sub-folder
+        /// of either. Absolute paths are refused (config.json only). Returns an error message or null.
+        /// </summary>
+        public static string UiRootProblem(string value, string full)
+        {
+            if (IsAbsoluteSetting(value)) return "Absolute paths can only be set in App_Data/config.json.";
+            if (!IsUnder(full, PublicRoot) && !IsUnder(full, MainRoot()))
+                return "Choose the main root, /App_Data/public, or a sub-folder of them (e.g. \"alex\").";
+            return RootProblem(full);
         }
 
         public static obConfig Get()

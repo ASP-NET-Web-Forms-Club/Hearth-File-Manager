@@ -36,9 +36,32 @@
         $('set-maxupload').value = S.MaxUploadMb;
         $('set-site').value = S.SitePreviewUrl || '';
         $('set-root').value = S.SiteRoot || '/App_Data/public';
-        $('set-root-full').textContent = S.SiteRootFull || '';
+        if (S.SiteRootLocked) {
+            $('set-root').disabled = true;
+            $('set-root-hint').hidden = true;
+            $('set-root-locked').hidden = false;
+        }
         $('set-devlogin').checked = !!S.DevAutoLogin;
         $('dev-block').hidden = !S.IsLocal;
+
+        var fwMode = $('set-fileswidth-mode');
+        var fwCustom = $('set-fileswidth-custom');
+        function setFwUi(val) {
+            val = val || '100%';
+            if (val === '100%' || val === '900px') {
+                fwMode.value = val;
+                fwCustom.hidden = true;
+            } else {
+                fwMode.value = 'custom';
+                fwCustom.value = parseInt(val, 10) || 1200;
+                fwCustom.hidden = false;
+            }
+        }
+        setFwUi(S.FilesWidth);
+        fwMode.addEventListener('change', function () {
+            fwCustom.hidden = fwMode.value !== 'custom';
+            if (!fwCustom.hidden && !fwCustom.value) fwCustom.value = '1200';
+        });
 
         $('set-load-models').addEventListener('click', async function () {
             var btn = this;
@@ -49,6 +72,7 @@
 
         form.addEventListener('submit', async function (e) {
             e.preventDefault();
+            var fw = fwMode.value === 'custom' ? (fwCustom.value.trim() || '1200') + 'px' : fwMode.value;
             var r = await Api.settings('save', {
                 key: $('set-key').value.trim(),
                 model: $('set-model').value.trim(),
@@ -56,13 +80,15 @@
                 maxupload: $('set-maxupload').value,
                 site: $('set-site').value.trim(),
                 root: $('set-root').value.trim(),
+                fileswidth: fw,
                 devlogin: $('set-devlogin').checked
             });
             Toast.result(r);
             if (r.success) {
                 $('set-key').value = '';
                 $('set-key-current').textContent = r.data.KeyMasked || 'none';
-                $('set-root-full').textContent = r.data.SiteRootFull || '';
+                if (!S.SiteRootLocked) $('set-root').value = r.data.SiteRootFull || $('set-root').value;
+                if (r.data.FilesWidth) setFwUi(r.data.FilesWidth);
             }
         });
     });

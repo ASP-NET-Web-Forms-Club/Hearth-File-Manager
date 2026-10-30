@@ -27,8 +27,11 @@ namespace HearthFileManager.RH
                 Fallbacks = string.Join(", ", cfg.GeminiFallbackModels ?? new System.Collections.Generic.List<string>()),
                 cfg.MaxUploadMb,
                 cfg.SitePreviewUrl,
-                cfg.SiteRoot,
-                SiteRootFull = AppConfig.MainRoot(),
+                FilesWidth = AppConfig.NormalizeFilesWidth(cfg.FilesWidth, false),
+                // a full path from config.json is never sent to the browser
+                SiteRoot = AppConfig.IsAbsoluteSetting(cfg.SiteRoot) ? AppConfig.DisplayPath(AppConfig.MainRoot()) : cfg.SiteRoot,
+                SiteRootLocked = AppConfig.IsAbsoluteSetting(cfg.SiteRoot),
+                SiteRootFull = AppConfig.DisplayPath(AppConfig.MainRoot()),
                 cfg.DevAutoLogin,
                 IsLocal = HttpContext.Current.Request.IsLocal
             }) + "\n" + StaticAsset.Script("/js/settings.js");
@@ -66,9 +69,9 @@ namespace HearthFileManager.RH
         <label class='field'>
             <span>Main root folder</span>
             <input type='text' id='set-root' placeholder='/App_Data/public' spellcheck='false' />
-            <small>The folder Hearth manages: the public website that your second IIS site serves. Default <b>/App_Data/public</b> (inside Hearth).
-            Absolute paths are allowed, e.g. <b>D:\websites\</b> or <b>C:\inetpub\wwwroot</b>; both / and \ work.
-            Resolved to: <b id='set-root-full'></b></small>
+            <small id='set-root-hint'>The folder Hearth manages: the public website that your second IIS site serves. <b>/App_Data/public</b> or a sub-folder of it, e.g. <b>/App_Data/public/site1</b>; both / and \ work.
+            Other locations (e.g. <b>D:\websites\</b>) can only be set by the server administrator in <b>App_Data/config.json</b>.</small>
+            <small id='set-root-locked' hidden><i class='fa-solid fa-lock'></i> Set in App_Data/config.json by the server administrator; it can't be changed here.</small>
         </label>
         <label class='field'>
             <span>Public website address</span>
@@ -78,6 +81,18 @@ namespace HearthFileManager.RH
         <label class='field'>
             <span>Maximum upload size (MB per file)</span>
             <input type='number' id='set-maxupload' min='1' max='4096' />
+        </label>
+        <label class='field'>
+            <span>File manager display width (system default)</span>
+            <div class='row'>
+                <select id='set-fileswidth-mode'>
+                    <option value='100%'>100% (Full width – default)</option>
+                    <option value='900px'>Max width 900px</option>
+                    <option value='custom'>Custom width (px)…</option>
+                </select>
+                <input type='number' id='set-fileswidth-custom' min='500' max='3840' step='10' placeholder='e.g. 1200' style='max-width:160px' hidden />
+            </div>
+            <small>Applies to all users by default. Each user can also override their own display width directly from the toolbar on the <b>My Files</b> page.</small>
         </label>
 
         <div id='dev-block' hidden>

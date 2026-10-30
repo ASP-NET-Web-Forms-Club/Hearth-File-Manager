@@ -25,6 +25,9 @@ namespace HearthFileManager.RH
 
                     case "list": Guard.LoggedIn(); List(); break;
                     case "read": Guard.LoggedIn(); Read(); break;
+                    case "set-width": Guard.LoggedIn(); SetWidth(); break;
+                    case "task-status": Guard.LoggedIn(); TaskStatus(); break;
+                    case "task-dismiss": Guard.LoggedIn(); TaskDismiss(); break;
                     // everything that changes files needs the "Manage files" permission
                     case "save": Guard.Mutating(Perm.Files); Save(); break;
                     case "mkdir": Guard.Mutating(Perm.Files); MkDir(); break;
@@ -37,6 +40,7 @@ namespace HearthFileManager.RH
                     case "empty-recycle": Guard.Mutating(Perm.Files); EmptyRecycle(); break;
                     case "zip": Guard.Mutating(Perm.Files); Zip(); break;
                     case "unzip": Guard.Mutating(Perm.Files); Unzip(); break;
+                    case "task-cancel": Guard.Mutating(Perm.Files); TaskCancel(); break;
                     case "upload-chunk": Guard.Mutating(Perm.Files); UploadChunk(); break;
                     default: ApiHelper.WriteError($"Unknown action: {action}", 400); break;
                 }
@@ -148,6 +152,27 @@ namespace HearthFileManager.RH
             ApiHelper.WriteSuccess($"Recycle bin emptied ({n} item(s) removed)");
         }
 
+        static void SetWidth()
+        {
+            obUser me = AppSession.LoginUser;
+            string w = AppConfig.NormalizeFilesWidth(Req.Form["width"], true);
+            string username = me.Username;
+            AppConfig.Update(c =>
+            {
+                foreach (obUser u in c.Users)
+                    if (string.Equals(u.Username, username, StringComparison.OrdinalIgnoreCase))
+                        u.FilesWidth = w;
+            });
+            obUser updated = AppConfig.FindUser(username);
+            string effective = AppConfig.EffectiveFilesWidth(updated);
+            ApiHelper.WriteSuccess("Display width updated", new
+            {
+                FilesWidth = effective,
+                UserFilesWidth = w,
+                SystemFilesWidth = AppConfig.NormalizeFilesWidth(AppConfig.Get().FilesWidth, false)
+            });
+        }
+
         static void Zip()
         {
             List<string> paths = Paths();
@@ -155,8 +180,9 @@ namespace HearthFileManager.RH
             string name = (Req.Form["name"] + "").Trim();
             if (name == "") name = (paths.Count == 1 ? FsService.NameOf(paths[0]) : "archive") + ".zip";
             if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) name += ".zip";
-            string rel = Fs.Zip(paths, FsService.Combine(FsService.ParentOf(paths[0]), name));
-            ApiHelper.WriteSuccess("Created " + FsService.NameOf(rel), new { Path = rel });
+            string destZipRel = FsService.Combine(FsService.ParentOf(paths[0]), name);
+            FileTask task = FileTaskManager.StartZip(AppSession.LoginUser.Username, Fs, paths, destZipRel);
+            ApiHelper.WriteSuccess("Started zipping", task.ToDto());
         }
 
         static void Unzip()
@@ -164,8 +190,33 @@ namespace HearthFileManager.RH
             string rel = FsService.NormalizeRel(Path);
             string dest = Req.Form["dest"];
             if (dest == null) dest = FsService.ParentOf(rel);
-            int n = Fs.Unzip(rel, dest);
-            ApiHelper.WriteSuccess($"Extracted {n} file(s)", new { Path = FsService.NormalizeRel(dest) });
+            FileTask task = FileTaskManager.StartUnzip(AppSession.LoginUser.Username, Fs, rel, dest);
+            ApiHelper.WriteSuccess("Started extraction", task.ToDto());
+        }
+
+        static void TaskStatus()
+        {
+            string taskId = Req["taskId"];
+            string owner = AppSession.LoginUser?.Username;
+            FileTask task = !string.IsNullOrEmpty(taskId)
+                ? FileTaskManager.Get(taskId, owner)
+                : FileTaskManager.LatestForUser(owner);
+            if (task == null) { ApiHelper.WriteError("Task not found.", 404); return; }
+            ApiHelper.WriteJson(new { success = true, message = "Success", data = task.ToDto() });
+        }
+
+        static void TaskCancel()
+        {
+            string taskId = Req["taskId"];
+            FileTask task = FileTaskManager.Cancel(taskId, AppSession.LoginUser?.Username);
+            ApiHelper.WriteSuccess("Canceling…", task.ToDto());
+        }
+
+        static void TaskDismiss()
+        {
+            string taskId = Req["taskId"];
+            FileTaskManager.Dismiss(taskId, AppSession.LoginUser?.Username);
+            ApiHelper.WriteSuccess("Dismissed");
         }
 
         static void UploadChunk()

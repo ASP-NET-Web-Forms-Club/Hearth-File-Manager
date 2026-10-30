@@ -20,7 +20,7 @@
             return '<tr data-user="' + Fmt.esc(u.Username) + '">' +
                 '<td><i class="fa-solid fa-circle-user" style="color:var(--text-3);margin-right:8px"></i>' + Fmt.esc(u.Username) + (self ? '<span class="badge">you</span>' : '') + '</td>' +
                 '<td><div class="perm-tags">' + tags + '</div></td>' +
-                '<td class="root-cell">' + (u.RootProblem ? '<i class="fa-solid fa-triangle-exclamation" style="color:var(--danger)" title="' + Fmt.esc(u.RootProblem) + '"></i> ' : '') + '<code>' + Fmt.esc(u.RootDisplay) + '</code>' + (u.RootPath ? '' : ' <small>(main root)</small>') + '</td>' +
+                '<td class="root-cell">' + (u.RootProblem ? '<i class="fa-solid fa-triangle-exclamation" style="color:var(--danger)" title="' + Fmt.esc(u.RootProblem) + '"></i> ' : '') + (u.RootLocked ? '<i class="fa-solid fa-lock" title="Set in config.json"></i> ' : '') + '<code>' + Fmt.esc(u.RootDisplay) + '</code>' + (u.RootPath ? '' : ' <small>(main root)</small>') + '</td>' +
                 '<td>' + Fmt.date(u.CreatedUtc) + '</td>' +
                 '<td class="col-actions">' +
                 '<button type="button" class="btn" data-act="perms" title="Permissions and root folder"><i class="fa-solid fa-user-pen"></i><span>Edit</span></button> ' +
@@ -48,11 +48,16 @@
     }
 
     /** Root folder field shared by the add and edit dialogs. */
-    function rootField(value) {
+    function rootField(value, locked) {
+        if (locked) {
+            return '<label class="field"><span>Root folder</span>' +
+                '<input type="text" class="root-input" value="' + Fmt.esc(value || '') + '" disabled />' +
+                '<small><i class="fa-solid fa-lock"></i> Set in App_Data/config.json by the server administrator; it can\'t be changed here.</small></label>';
+        }
         return '<label class="field"><span>Root folder</span>' +
             '<input type="text" class="root-input" spellcheck="false" placeholder="(empty = main root)" value="' + Fmt.esc(value || '') + '" />' +
-            '<small>Empty = the main root. <b>alex</b> = sub-folder of the main root. <b>/App_Data/public/alex</b> = inside Hearth. ' +
-            '<b>D:\\websites\\alex-site</b> = absolute path. Both / and \\ work. The folder is created if missing.</small></label>';
+            '<small>Empty = the main root. <b>alex</b> = a sub-folder of the main root. <b>/App_Data/public/alex</b> also works. ' +
+            'Both / and \\ work, and the folder is created if missing. Folders elsewhere on the server can only be set in App_Data/config.json.</small></label>';
     }
 
     function readPerms(body) {
@@ -86,7 +91,7 @@
         var v = await Dialog.open({
             title: 'Edit ' + name,
             okText: 'Save',
-            html: rootField(u.RootPath) + '<p style="margin:4px 0 8px"><b>Permissions</b></p>' + permChecks(u.Permissions, isMe(name)),
+            html: rootField(u.RootPath, u.RootLocked) +'<p style="margin:4px 0 8px"><b>Permissions</b></p>' + permChecks(u.Permissions, isMe(name)),
             onOpen: function (body) { wirePermChecks(body); },
             getValue: function (state, body) { return { perms: readPerms(body), root: body.querySelector('.root-input').value.trim() }; }
         });

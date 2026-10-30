@@ -20,6 +20,8 @@ Give a client (or yourself) a friendly place to manage a website's files on an I
 - **Multi-user with permissions**: per user, tick *Manage files* (without it the user is view & download only),
   *Use AI website builder*, *Manage settings* and *Manage users*. Everyone can change their own password on *My Account*.
   Lock-out protection: you can't delete yourself or remove your own *Manage users*, and one user must always keep it
+- **Per-user root folders**: give each user their own sub-folder (e.g. one site per client); they only see and change that folder.
+  Server folders outside Hearth can be assigned by the administrator in `config.json`, and are shown masked in the browser
 
 ### Gemini-powered website builder
 ![AI Website Builder](wiki/screenshot-gemini-ui.png)
@@ -76,14 +78,35 @@ $pdo = new PDO('sqlite:' . __DIR__ . '/App_Data/site.db');
 
 ### Root folders (main root and per-user roots)
 
-- **Main root** (*Settings → Main root folder*): default `/App_Data/public`. It can also be an absolute path such as
-  `D:\websites\` or `C:\inetpub\wwwroot`. Keeping the website **outside** the Hearth folder means a Hearth update or
-  redeploy can never touch the website's files.
-- **Per-user root** (*Users → Edit*): empty = the main root; `alex` = sub-folder of the main root;
-  `/App_Data/public/alex` = path inside Hearth; or absolute, e.g. `D:\websites\alex-site\`. Users only see their own root,
-  and their recycle bin only contains what was deleted from it.
+- **Main root** (*Settings → Main root folder*): default `/App_Data/public`, or a sub-folder of it.
+- **Per-user root** (*Users → Edit*): empty = the main root; `alex` = sub-folder of the main root
+  (`/App_Data/public/alex` also works). Users only see their own root, and their recycle bin only contains what was deleted from it.
+- **Folders elsewhere on the server** (e.g. `D:\websites\`, `C:\inetpub\wwwroot`, `D:\websites\alex-site\`) can only be set by
+  the server administrator in `App_Data/config.json` (`"SiteRoot"`, or a user's `"RootPath"`). The UI then shows them
+  **masked** (only the last folder name, e.g. `…\alex-site`) and **locked**, so server paths are never disclosed or changed from the browser.
+  Keeping the website outside the Hearth folder means a Hearth update or redeploy can never touch the website's files.
 - Both `/` and `\` are accepted. A root may not contain the Hearth folder itself or Hearth's private folders.
-- If Hearth can't write to a root, the *My Files* page shows a warning with the permission to set.
+- If Hearth can't write to a root, the *My Files* page shows a warning.
+
+#### Using a folder outside Hearth (server administrator, `config.json`)
+
+Recommended for production, so the website and the Hearth program are fully separate. Edit `App_Data/config.json`:
+
+```json
+{
+  "SiteRoot": "D:\\websites\\example.com",
+  "Users": [
+    { "Username": "admin", "RootPath": "", ... },
+    { "Username": "alex",  "RootPath": "D:\\websites\\alex-site", ... }
+  ]
+}
+```
+
+- In JSON, write each backslash twice (`D:\\websites`), or use forward slashes (`D:/websites`).
+- `"RootPath": ""` = the main root; a relative value like `"alex"` = a sub-folder of the main root.
+- Changes apply on the next request; no restart is needed.
+- Give the Hearth app pool identity **Modify** permission on the new folder, and point IIS site #2 at it.
+- In the browser these roots appear locked and masked, e.g. `…\example.com`.
 
 ---
 
@@ -106,7 +129,7 @@ $pdo = new PDO('sqlite:' . __DIR__ . '/App_Data/site.db');
 3. **IIS site #1 – Hearth**
    - Physical path: `C:\inetpub\hearth\`
    - App pool (e.g. `Hearth`): .NET CLR v4.0, Integrated pipeline
-   - Give the app pool identity **Modify** permission on `App_Data` (and on the main root if it's elsewhere):
+   - Give the app pool identity **Modify** permission on `App_Data` (and on any root set to a folder outside Hearth in `config.json`):
      ```
      icacls "C:\inetpub\hearth\App_Data" /grant "IIS AppPool\Hearth:(OI)(CI)M"
      ```

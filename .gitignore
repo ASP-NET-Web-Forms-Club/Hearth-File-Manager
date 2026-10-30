@@ -8,9 +8,9 @@ packages/
 
 # ---------------------------------------------------------------------------
 # App_Data: commit only the skeleton, never runtime data.
-#   kept:    config.sample.json, readme.txt, public/web.config, public/App_Data/.gitkeep
+#   kept:    config.sample.json, readme.txt, public/web.config.sample, public/App_Data/.gitkeep
 #   ignored: config.json (API key, password hashes), sessions, recycle bin, undo, tmp,
-#            and every website file / database inside public/
+#            public/web.config, and every website file / database inside public/
 # ---------------------------------------------------------------------------
 HearthFileManager/App_Data/*
 !HearthFileManager/App_Data/config.sample.json
@@ -18,7 +18,7 @@ HearthFileManager/App_Data/*
 !HearthFileManager/App_Data/public/
 
 HearthFileManager/App_Data/public/*
-!HearthFileManager/App_Data/public/web.config
+!HearthFileManager/App_Data/public/web.config.sample
 !HearthFileManager/App_Data/public/App_Data/
 
 HearthFileManager/App_Data/public/App_Data/*

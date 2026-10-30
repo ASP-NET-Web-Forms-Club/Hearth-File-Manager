@@ -44,7 +44,9 @@ namespace HearthFileManager.RH
                     u.Username,
                     u.CreatedUtc,
                     Permissions = u.EffectivePermissions(),
-                    RootPath = u.RootPath ?? "",
+                    // full paths set in config.json are masked and locked in the UI
+                    RootPath = AppConfig.IsAbsoluteSetting(u.RootPath) ? AppConfig.DisplayPath(full) : (u.RootPath ?? ""),
+                    RootLocked = AppConfig.IsAbsoluteSetting(u.RootPath),
                     RootDisplay = AppConfig.DisplayPath(full),
                     RootProblem = AppConfig.RootProblem(full)
                 });
@@ -71,16 +73,19 @@ namespace HearthFileManager.RH
         /// "/App_Data/public/alex" = relative to Hearth; "D:\sites\alex" = absolute. "/" and "\" both accepted.
         /// Returns null and writes an error when the folder is not allowed.
         /// </summary>
-        static string PostedRoot()
+        static string PostedRoot(obUser existing = null)
         {
+            // a full path set in config.json is locked: keep it, whatever the browser sent
+            if (existing != null && AppConfig.IsAbsoluteSetting(existing.RootPath)) return existing.RootPath;
+
             string root = AppConfig.NormalizePathSetting(Req.Form["root"]);
             string full;
             try { full = AppConfig.ResolvePath(root, AppConfig.MainRoot()); }
             catch (Exception ex) { ApiHelper.WriteError("Invalid root folder: " + ex.Message); return null; }
-            string problem = AppConfig.RootProblem(full);
+            string problem = AppConfig.UiRootProblem(root, full);
             if (problem != null) { ApiHelper.WriteError(problem); return null; }
             try { System.IO.Directory.CreateDirectory(full); }
-            catch (Exception ex) { ApiHelper.WriteError("Could not create the folder " + full + ": " + ex.Message); return null; }
+            catch (Exception ex) { ApiHelper.WriteError("Could not create the folder " + AppConfig.DisplayPath(full) + ": " + ex.Message); return null; }
             return root;
         }
 
@@ -122,7 +127,7 @@ namespace HearthFileManager.RH
                 if (!AnotherManagerExists(u.Username)) { ApiHelper.WriteError("At least one user must keep the \"Manage users\" permission."); return; }
             }
 
-            string root = PostedRoot();
+            string root = PostedRoot(u);
             if (root == null) return;
             AppConfig.Update(c => { foreach (obUser x in c.Users) if (x.Username == u.Username) { x.Permissions = perms; x.RootPath = root; } });
             ApiHelper.WriteSuccess("Saved changes for " + u.Username);

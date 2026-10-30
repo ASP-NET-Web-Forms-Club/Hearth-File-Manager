@@ -42,16 +42,30 @@ namespace HearthFileManager.RH
             if (site != "" && !Uri.IsWellFormedUriString(site, UriKind.Absolute)) { ApiHelper.WriteError("The website address must start with http:// or https://"); return; }
             bool isLocal = Req.IsLocal;
 
-            // main root folder: validate before saving
-            string root = AppConfig.NormalizePathSetting(Req.Form["root"]);
-            if (root == "") root = "/App_Data/public";
+            // main root folder. A full path set in config.json is locked: the UI never changes or reveals it.
+            // From the UI only /App_Data/public or a sub-folder of it is accepted.
+            string current = AppConfig.Get().SiteRoot;
+            bool locked = AppConfig.IsAbsoluteSetting(current);
+            string root = current;
             string rootFull;
-            try { rootFull = AppConfig.ResolvePath(root, AppConfig.AppRoot); }
-            catch (Exception ex) { ApiHelper.WriteError("Invalid root folder: " + ex.Message); return; }
-            string problem = AppConfig.RootProblem(rootFull);
-            if (problem != null) { ApiHelper.WriteError(problem); return; }
+            if (locked) rootFull = AppConfig.MainRoot();
+            else
+            {
+                root = AppConfig.NormalizePathSetting(Req.Form["root"]);
+                if (root == "") root = AppConfig.DefaultSiteRoot;
+                if (AppConfig.IsAbsoluteSetting(root)) { ApiHelper.WriteError("Absolute paths can only be set in App_Data/config.json."); return; }
+                try { rootFull = AppConfig.ResolvePath(root, AppConfig.AppRoot); }
+                catch (Exception ex) { ApiHelper.WriteError("Invalid root folder: " + ex.Message); return; }
+                string pub = AppConfig.PublicRoot;
+                if (!string.Equals(rootFull, pub, StringComparison.OrdinalIgnoreCase) && !rootFull.StartsWith(pub + "\\", StringComparison.OrdinalIgnoreCase))
+                { ApiHelper.WriteError("The main root must be /App_Data/public or a sub-folder of it. Other locations can only be set in App_Data/config.json."); return; }
+                string problem = AppConfig.RootProblem(rootFull);
+                if (problem != null) { ApiHelper.WriteError(problem); return; }
+            }
             string writeProblem = new FsService(AppConfig.AppDataPath, rootFull).WriteProblem();
+            string rootShown = AppConfig.DisplayPath(rootFull);
             bool devLogin = Req.Form["devlogin"] == "1";
+            string filesWidth = AppConfig.NormalizeFilesWidth(Req.Form["fileswidth"], false);
 
             AppConfig.Update(c =>
             {
@@ -61,11 +75,12 @@ namespace HearthFileManager.RH
                 c.MaxUploadMb = Int("maxupload", 1, 4096, c.MaxUploadMb);
                 c.SitePreviewUrl = site;
                 c.SiteRoot = root;
+                c.FilesWidth = filesWidth;
                 if (isLocal) c.DevAutoLogin = devLogin;
             });
             string msg = writeProblem == null ? "Settings saved"
-                : "Settings saved, but Hearth cannot write to " + rootFull + " (" + writeProblem + "). Give the IIS app pool identity Modify permission on it.";
-            ApiHelper.WriteSuccess(msg, new { KeyMasked = SettingsPage.MaskKey(AppConfig.Get().GeminiApiKey), SiteRootFull = rootFull });
+                : "Settings saved, but Hearth cannot write to the root folder " + rootShown + ". Give the IIS app pool identity Modify permission on it.";
+            ApiHelper.WriteSuccess(msg, new { KeyMasked = SettingsPage.MaskKey(AppConfig.Get().GeminiApiKey), SiteRootFull = rootShown, FilesWidth = filesWidth });
         }
 
         static void Models()

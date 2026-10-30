@@ -33,6 +33,19 @@ Check "root = App_Data\recycle-bin no"  ($AC::RootProblem("$ad\recycle-bin\x") -
 Check "root = App_Data\public ok"       ($AC::RootProblem($main) -eq $null) ""
 Check "root = other drive folder ok"    ($AC::RootProblem("D:\websites\alex") -eq $null) ""
 
+# --- UI restrictions & masking (full paths only via config.json) ------------
+Check "absolute detected (drive)"       ($AC::IsAbsoluteSetting("D:/websites/x")) ""
+Check "absolute detected (UNC)"         ($AC::IsAbsoluteSetting("\\server\share")) ""
+Check "relative not absolute"           (-not $AC::IsAbsoluteSetting("/App_Data/public/alex")) ""
+$masked = $AC::DisplayPath("D:\websites\alex-site")
+Check "mask outside Hearth"             ($masked.EndsWith("\alex-site") -and $masked -notmatch "websites|D:") $masked
+Check "inside Hearth shown relative"    ($AC::DisplayPath("$main\alex") -eq "/App_Data/public/alex") ""
+Check "UI: sub-folder ok"               ($AC::UiRootProblem("alex", "$main\alex") -eq $null) ""
+Check "UI: /App_Data/public/x ok"       ($AC::UiRootProblem("/App_Data/public/x", "$main\x") -eq $null) ""
+Check "UI: absolute refused"            ($AC::UiRootProblem("D:\websites\x", "D:\websites\x") -ne $null) ""
+Check "UI: outside public refused"      ($AC::UiRootProblem("/App_Data/other", "$ad\other") -ne $null) ""
+Check "UI: escape with .. refused"      ($AC::UiRootProblem("../../x", (Resolve-Path "$app\..").Path + "\x") -ne $null) ""
+
 # --- isolation + recycle bin -------------------------------------------------
 $adminFs = New-Object HearthFileManager.engine.FsService($ad, $main)
 $alexFs  = New-Object HearthFileManager.engine.FsService($ad, "$main\alex")

@@ -259,11 +259,9 @@
             var def = (s.length === 1 ? s[0].Name.replace(/\.[^.]+$/, '') || s[0].Name : 'archive') + '.zip';
             var name = await Dialog.prompt('Create zip file', 'Zip file name:', def, 'Create zip');
             if (!name) return;
-            busy(true);
             var r = await Api.files('zip', { paths: s.map(function (i) { return i.Path; }), name: name.trim() });
-            busy(false);
-            Toast.result(r);
-            if (r.success) { await refresh(); select(r.data.Path); }
+            if (!r.success) { Toast.error(r.message); return; }
+            startTask(r.data);
         },
         'unzip': function () { var s = selected(); if (s.length === 1) unzip(s[0]); },
         'delete': async function () {
@@ -329,12 +327,183 @@
             getValue: function () { return document.querySelector('input[name=uz]:checked').value; }
         });
         if (!choice) return;
-        busy(true);
         var dest = choice === 'folder' ? (S.path ? S.path + '/' : '') + base : S.path;
         var r = await Api.files('unzip', { path: it.Path, dest: dest });
-        busy(false);
-        Toast.result(r);
-        refresh();
+        if (!r.success) { Toast.error(r.message); return; }
+        startTask(r.data);
+    }
+
+    // ------------------------------------------------------------------ center display width & bottom task progress
+
+    function applyWidthUi(w) {
+        w = w || '100%';
+        CFG.FilesWidth = w;
+        if (w === '100%') el.fm.style.removeProperty('--fm-max-w');
+        else el.fm.style.setProperty('--fm-max-w', w);
+
+        var isCustom = w !== '100%' && w !== '900px';
+        document.querySelectorAll('.btn-width').forEach(function (b) {
+            var bw = b.getAttribute('data-width');
+            var active = bw === w || (bw === 'custom' && isCustom);
+            b.classList.toggle('active', active);
+        });
+        var customBtn = document.getElementById('btn-width-custom');
+        if (customBtn) customBtn.textContent = isCustom ? 'Custom (' + w + ')' : 'Custom';
+    }
+
+    async function selectWidth(mode) {
+        var val = mode;
+        if (mode === 'custom') {
+            var cur = (CFG.FilesWidth && CFG.FilesWidth !== '100%' && CFG.FilesWidth !== '900px')
+                ? String(parseInt(CFG.FilesWidth, 10) || 1200)
+                : '1200';
+            var input = await Dialog.prompt(
+                'Custom display width',
+                'Enter center display max-width in pixels (500–3840) or percentage (40%–100%), or type "default" to use the system setting (' + (CFG.SystemFilesWidth || '100%') + '):',
+                cur,
+                'Apply width'
+            );
+            if (input === null) return;
+            val = input.trim() || 'default';
+        }
+        if (val !== 'default' && val !== 'system' && val !== '') {
+            var preview = val;
+            if (/^\d+$/.test(preview)) preview = Math.max(500, Math.min(3840, parseInt(preview, 10))) + 'px';
+            applyWidthUi(preview);
+        }
+        var r = await Api.files('set-width', { width: val });
+        if (!r.success) { Toast.error(r.message); return; }
+        CFG.UserFilesWidth = r.data.UserFilesWidth;
+        CFG.SystemFilesWidth = r.data.SystemFilesWidth;
+        applyWidthUi(r.data.FilesWidth);
+    }
+
+    var activeTask = null, taskPollTimer = null, taskClockTimer = null;
+
+    function fmtDuration(ms) {
+        ms = Math.max(0, ms || 0);
+        if (ms < 10000) return (ms / 1000).toFixed(1) + 's';
+        var totalSec = Math.round(ms / 1000);
+        var m = Math.floor(totalSec / 60), s = totalSec % 60;
+        if (m === 0) return s + 's';
+        var h = Math.floor(m / 60);
+        m = m % 60;
+        return h > 0 ? (h + 'h ' + m + 'm ' + s + 's') : (m + 'm ' + (s < 10 ? '0' + s : s) + 's');
+    }
+
+    function fmtClockTime(iso) {
+        if (!iso) return '';
+        var d = new Date(/Z$|[+-]\d\d:\d\d$/.test(iso) ? iso : iso + 'Z');
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function startTask(dto, isInitialLoad) {
+        if (!dto || !el.taskbar) return;
+        clearTimeout(taskPollTimer);
+        clearInterval(taskClockTimer);
+        activeTask = dto;
+        activeTask._clientSyncAt = Date.now();
+        el.taskCancel.disabled = false;
+        el.taskCancel.querySelector('span').textContent = 'Cancel';
+        renderTaskBar(dto);
+
+        if (!dto.Done) {
+            taskPollTimer = setTimeout(pollTask, 2000);
+            taskClockTimer = setInterval(function () {
+                if (activeTask && !activeTask.Done) renderTaskBar(activeTask);
+            }, 1000);
+        } else if (!isInitialLoad) {
+            onTaskFinished(dto);
+        }
+    }
+
+    async function pollTask() {
+        if (!activeTask || activeTask.Done) return;
+        var r = await Api.get('/fileapi', 'task-status', { taskId: activeTask.TaskId });
+        if (!activeTask) return;
+        if (!r.success) {
+            if (/reach the server/i.test(r.message)) { taskPollTimer = setTimeout(pollTask, 2000); return; }
+            clearInterval(taskClockTimer);
+            activeTask.Done = true;
+            activeTask.Status = 'error';
+            activeTask.Message = r.message;
+            renderTaskBar(activeTask);
+            return;
+        }
+        var d = r.data;
+        d._clientSyncAt = Date.now();
+        activeTask = d;
+        renderTaskBar(d);
+        if (d.Done) {
+            clearInterval(taskClockTimer);
+            onTaskFinished(d);
+        } else {
+            taskPollTimer = setTimeout(pollTask, 2000);
+        }
+    }
+
+    async function onTaskFinished(d) {
+        await refresh();
+        if (d.Status === 'done' && d.Kind === 'zip' && d.ResultPath && S.path === d.FolderPath) {
+            select(d.ResultPath);
+        }
+    }
+
+    function renderTaskBar(d) {
+        el.taskbar.hidden = false;
+        el.taskbar.className = 'fm-taskbar ' + (d.Status || 'running');
+
+        if (!d.Done) {
+            el.taskIcon.innerHTML = '<span class="spinner"></span>';
+            var cur = d.CurrentFile ? ' · ' + d.CurrentFile : '';
+            el.taskTitle.textContent = d.Title + cur;
+            var liveElapsed = (d.ElapsedMs || 0) + (d._clientSyncAt ? (Date.now() - d._clientSyncAt) : 0);
+            var filesPart = d.TotalFiles > 0 ? (d.DoneFiles + ' / ' + d.TotalFiles + ' file(s)') : 'Preparing…';
+            var bytesPart = d.TotalBytes > 0 ? (' · ' + Fmt.size(d.DoneBytes) + ' / ' + Fmt.size(d.TotalBytes)) : '';
+            el.taskMeta.textContent = filesPart + bytesPart + ' · Elapsed: ' + fmtDuration(liveElapsed);
+            el.taskPct.textContent = (d.Percent || 0) + '%';
+            el.taskBar.style.width = (d.Percent || 0) + '%';
+            el.taskCancel.hidden = false;
+            el.taskClose.hidden = true;
+        } else {
+            var icon = d.Status === 'done' ? 'fa-circle-check' : (d.Status === 'canceled' ? 'fa-ban' : 'fa-circle-exclamation');
+            var label = d.Status === 'done' ? 'Completed' : (d.Status === 'canceled' ? 'Canceled' : 'Failed');
+            el.taskIcon.innerHTML = '<i class="fa-solid ' + icon + '"></i>';
+            el.taskTitle.textContent = label + ' — ' + (d.Message || d.Title);
+            var endClock = fmtClockTime(d.CompletedUtc) || fmtClockTime(new Date().toISOString());
+            el.taskMeta.textContent = 'Finished at ' + endClock + ' · Time used: ' + fmtDuration(d.ElapsedMs);
+            var finalPct = d.Status === 'done' ? 100 : (d.Percent || 100);
+            el.taskPct.textContent = d.Status === 'done' ? '100%' : label;
+            el.taskBar.style.width = Math.max(10, finalPct) + '%';
+            el.taskCancel.hidden = true;
+            el.taskClose.hidden = false;
+        }
+    }
+
+    async function cancelTask() {
+        if (!activeTask || activeTask.Done) return;
+        el.taskCancel.disabled = true;
+        el.taskCancel.querySelector('span').textContent = 'Canceling…';
+        var r = await Api.files('task-cancel', { taskId: activeTask.TaskId });
+        if (r.success && r.data) {
+            r.data._clientSyncAt = Date.now();
+            activeTask = r.data;
+            renderTaskBar(activeTask);
+            if (activeTask.Done) {
+                clearTimeout(taskPollTimer);
+                clearInterval(taskClockTimer);
+                onTaskFinished(activeTask);
+            }
+        }
+    }
+
+    function closeTaskBar() {
+        clearTimeout(taskPollTimer);
+        clearInterval(taskClockTimer);
+        var id = activeTask ? activeTask.TaskId : null;
+        activeTask = null;
+        el.taskbar.hidden = true;
+        if (id) Api.files('task-dismiss', { taskId: id });
     }
 
     function download(paths) {
@@ -599,7 +768,12 @@
             if (b) run(b.getAttribute('data-act'));
             var v = e.target.closest('[data-view]');
             if (v) setView(v.getAttribute('data-view'));
+            var w = e.target.closest('[data-width]');
+            if (w) selectWidth(w.getAttribute('data-width'));
         });
+
+        if (el.taskCancel) el.taskCancel.addEventListener('click', cancelTask);
+        if (el.taskClose) el.taskClose.addEventListener('click', closeTaskBar);
 
         el.menu.addEventListener('click', function (e) {
             var b = e.target.closest('[data-act]');
@@ -720,12 +894,22 @@
         el.lightbox = document.getElementById('lightbox');
         el.lbImg = document.getElementById('lightbox-img');
         el.lbCap = document.getElementById('lightbox-cap');
+        el.taskbar = document.getElementById('fm-taskbar');
+        el.taskIcon = document.getElementById('task-icon');
+        el.taskTitle = document.getElementById('task-title');
+        el.taskMeta = document.getElementById('task-meta');
+        el.taskPct = document.getElementById('task-pct');
+        el.taskBar = document.getElementById('task-bar');
+        el.taskCancel = document.getElementById('task-cancel');
+        el.taskClose = document.getElementById('task-close');
 
         el.fm.classList.toggle('read-only', !CFG.CanEdit);
+        applyWidthUi(CFG.FilesWidth || '100%');
         S.view = store('hfm.view') === 'grid' ? 'grid' : 'list';
         document.querySelectorAll('[data-view]').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === S.view); });
         wire();
         wireDragDrop();
+        if (CFG.ActiveTask) startTask(CFG.ActiveTask, true);
         load(location.hash.length > 1 ? decodeURIComponent(location.hash.slice(1)) : '');
     });
 })();

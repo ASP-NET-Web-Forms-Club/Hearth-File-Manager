@@ -1,6 +1,7 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <!--
   Public website managed by Hearth File Manager.
+  Rename this file to "web.config" inside the public website root folder.
   Second guard for the private App_Data folder (SQLite databases): IIS already hides "App_Data"
   and does not serve unknown file types such as .db by default; these rules keep it that way even
   if the server defaults are changed. Keep them when editing this file.

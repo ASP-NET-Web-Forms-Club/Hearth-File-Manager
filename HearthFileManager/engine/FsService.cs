@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using Newtonsoft.Json;
 
 namespace HearthFileManager.engine
@@ -77,7 +78,14 @@ namespace HearthFileManager.engine
         {
             Directory.CreateDirectory(RecycleDir);
             Directory.CreateDirectory(TempPath);
-            try { Directory.CreateDirectory(Root); } catch { /* reported by CanWrite() */ }
+            try
+            {
+                Directory.CreateDirectory(Root);
+                string wc = System.IO.Path.Combine(Root, "web.config");
+                string sample = System.IO.Path.Combine(Root, "web.config.sample");
+                if (!File.Exists(wc) && File.Exists(sample)) File.Copy(sample, wc);
+            }
+            catch { /* reported by CanWrite() */ }
         }
 
         /// <summary>Checks that the IIS identity can create files in the root. Returns null when OK.</summary>
@@ -508,24 +516,108 @@ namespace HearthFileManager.engine
 
         // ------------------------------------------------------------------ zip
 
-        /// <summary>Zips the given items (files/folders) into destZipRel.</summary>
-        public string Zip(IList<string> rels, string destZipRel)
+        public class obZipProgress
         {
-            if (rels.Count == 0) throw new FsException("Nothing selected.");
+            public int TotalFiles;
+            public int DoneFiles;
+            public long TotalBytes;
+            public long DoneBytes;
+            public string CurrentFile = "";
+        }
+
+        struct ZipWorkItem
+        {
+            public string FullPath;
+            public string EntryName;
+            public long Size;
+        }
+
+        /// <summary>Zips the given items (files/folders) into destZipRel. Supports progress reporting and cancellation (deletes partial zip on cancel).</summary>
+        public string Zip(IList<string> rels, string destZipRel, obZipProgress prog = null, CancellationToken ct = default(CancellationToken))
+        {
+            if (rels == null || rels.Count == 0) throw new FsException("Nothing selected.");
             destZipRel = UniqueName(destZipRel);
             string zipFull = Resolve(destZipRel);
-            using (var zip = ZipFile.Open(zipFull, ZipArchiveMode.Create))
+
+            var work = new List<ZipWorkItem>();
+            long totalBytes = 0;
+            int totalFiles = 0;
+            foreach (string rel in rels)
             {
-                foreach (string rel in rels)
+                ct.ThrowIfCancellationRequested();
+                string full = Resolve(rel);
+                if (string.Equals(full, zipFull, StringComparison.OrdinalIgnoreCase)) continue;
+                if (File.Exists(full))
                 {
-                    string full = Resolve(rel);
-                    if (string.Equals(full, zipFull, StringComparison.OrdinalIgnoreCase)) continue;
-                    if (File.Exists(full)) zip.CreateEntryFromFile(full, NameOf(rel), CompressionLevel.Optimal);
-                    else if (Directory.Exists(full)) AddDirToZip(zip, full, NameOf(rel), zipFull);
-                    else throw new FsException("Not found: " + rel);
+                    long len = new FileInfo(full).Length;
+                    work.Add(new ZipWorkItem { FullPath = full, EntryName = NameOf(rel), Size = len });
+                    totalFiles++;
+                    totalBytes += len;
                 }
+                else if (Directory.Exists(full)) CollectDirForZip(work, full, NameOf(rel), zipFull, ref totalFiles, ref totalBytes, ct);
+                else throw new FsException("Not found: " + rel);
             }
-            return destZipRel;
+            if (prog != null) { prog.TotalFiles = totalFiles; prog.TotalBytes = totalBytes; }
+
+            byte[] buf = new byte[81920];
+            try
+            {
+                using (var fs = new FileStream(zipFull, FileMode.Create, FileAccess.Write, FileShare.None))
+                using (var zip = new ZipArchive(fs, ZipArchiveMode.Create))
+                {
+                    foreach (ZipWorkItem item in work)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        if (item.FullPath == null)
+                        {
+                            zip.CreateEntry(item.EntryName);
+                            continue;
+                        }
+                        if (prog != null) prog.CurrentFile = item.EntryName;
+                        ZipArchiveEntry entry = zip.CreateEntry(item.EntryName, CompressionLevel.Optimal);
+                        try { entry.LastWriteTime = File.GetLastWriteTime(item.FullPath); } catch { }
+                        using (var src = new FileStream(item.FullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                        using (var dst = entry.Open())
+                        {
+                            int read;
+                            while ((read = src.Read(buf, 0, buf.Length)) > 0)
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                dst.Write(buf, 0, read);
+                                if (prog != null) Interlocked.Add(ref prog.DoneBytes, read);
+                            }
+                        }
+                        if (prog != null) Interlocked.Increment(ref prog.DoneFiles);
+                    }
+                }
+                return destZipRel;
+            }
+            catch
+            {
+                if (File.Exists(zipFull)) { try { File.Delete(zipFull); } catch { } }
+                throw;
+            }
+        }
+
+        static void CollectDirForZip(List<ZipWorkItem> work, string dir, string prefix, string skipFile, ref int totalFiles, ref long totalBytes, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            string[] files = Directory.GetFiles(dir);
+            string[] dirs = Directory.GetDirectories(dir);
+            if (files.Length == 0 && dirs.Length == 0)
+            {
+                work.Add(new ZipWorkItem { FullPath = null, EntryName = prefix + "/", Size = 0 });
+                return;
+            }
+            foreach (string f in files)
+            {
+                if (skipFile != null && string.Equals(f, skipFile, StringComparison.OrdinalIgnoreCase)) continue;
+                long len = new FileInfo(f).Length;
+                work.Add(new ZipWorkItem { FullPath = f, EntryName = prefix + "/" + System.IO.Path.GetFileName(f), Size = len });
+                totalFiles++;
+                totalBytes += len;
+            }
+            foreach (string d in dirs) CollectDirForZip(work, d, prefix + "/" + System.IO.Path.GetFileName(d), skipFile, ref totalFiles, ref totalBytes, ct);
         }
 
         /// <summary>Writes a zip of the given items to a stream (used for multi-file download).</summary>
@@ -555,8 +647,8 @@ namespace HearthFileManager.engine
             foreach (string d in dirs) AddDirToZip(zip, d, prefix + "/" + System.IO.Path.GetFileName(d), skipFile);
         }
 
-        /// <summary>Extracts into destFolderRel. Existing files are overwritten (old copy goes to recycle bin). Zip-slip safe.</summary>
-        public int Unzip(string zipRel, string destFolderRel)
+        /// <summary>Extracts into destFolderRel. Existing files are overwritten (old copy goes to recycle bin). Zip-slip safe. Supports progress and cancellation (cleans up half-written file on cancel).</summary>
+        public int Unzip(string zipRel, string destFolderRel, obZipProgress prog = null, CancellationToken ct = default(CancellationToken))
         {
             string zipFull = Resolve(zipRel);
             if (!File.Exists(zipFull)) throw new FsException("Zip file not found: " + zipRel);
@@ -564,22 +656,63 @@ namespace HearthFileManager.engine
             Directory.CreateDirectory(destFull);
 
             int count = 0;
-            using (var zip = ZipFile.OpenRead(zipFull))
+            string partialFile = null;
+            byte[] buf = new byte[81920];
+            try
             {
-                foreach (ZipArchiveEntry entry in zip.Entries)
+                using (var zip = ZipFile.OpenRead(zipFull))
                 {
-                    string entryRel = Combine(destFolderRel, entry.FullName);
-                    string target = Resolve(entryRel); // throws on ../ escape
-                    if (entry.FullName.EndsWith("/") || entry.FullName.EndsWith("\\")) { Directory.CreateDirectory(target); continue; }
-                    if (IsSystemFolder(entryRel)) continue;
-                    if (Directory.Exists(target)) throw new FsException("A folder blocks extraction of " + entry.FullName);
-                    if (File.Exists(target)) Delete(entryRel, "unzip");
-                    Directory.CreateDirectory(System.IO.Path.GetDirectoryName(target));
-                    entry.ExtractToFile(target, false);
-                    count++;
+                    if (prog != null)
+                    {
+                        int tf = 0;
+                        long tb = 0;
+                        foreach (ZipArchiveEntry e in zip.Entries)
+                        {
+                            if (e.FullName.EndsWith("/") || e.FullName.EndsWith("\\")) continue;
+                            tf++;
+                            tb += e.Length;
+                        }
+                        prog.TotalFiles = tf;
+                        prog.TotalBytes = tb;
+                    }
+
+                    foreach (ZipArchiveEntry entry in zip.Entries)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        string entryRel = Combine(destFolderRel, entry.FullName);
+                        string target = Resolve(entryRel); // throws on ../ escape
+                        if (entry.FullName.EndsWith("/") || entry.FullName.EndsWith("\\")) { Directory.CreateDirectory(target); continue; }
+                        if (IsSystemFolder(entryRel)) continue;
+                        if (Directory.Exists(target)) throw new FsException("A folder blocks extraction of " + entry.FullName);
+                        if (File.Exists(target)) Delete(entryRel, "unzip");
+                        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(target));
+
+                        if (prog != null) prog.CurrentFile = entry.FullName;
+                        partialFile = target;
+                        using (var src = entry.Open())
+                        using (var dst = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None))
+                        {
+                            int read;
+                            while ((read = src.Read(buf, 0, buf.Length)) > 0)
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                dst.Write(buf, 0, read);
+                                if (prog != null) Interlocked.Add(ref prog.DoneBytes, read);
+                            }
+                        }
+                        try { File.SetLastWriteTimeUtc(target, entry.LastWriteTime.UtcDateTime); } catch { }
+                        partialFile = null;
+                        count++;
+                        if (prog != null) Interlocked.Increment(ref prog.DoneFiles);
+                    }
                 }
+                return count;
             }
-            return count;
+            catch
+            {
+                if (partialFile != null && File.Exists(partialFile)) { try { File.Delete(partialFile); } catch { } }
+                throw;
+            }
         }
 
         // ------------------------------------------------------------------ chunked upload

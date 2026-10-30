@@ -22,13 +22,20 @@ namespace HearthFileManager.RH
                 try { problem = FsService.ForUser(AppSession.LoginUser).WriteProblem(); }
                 catch (Exception ex) { problem = ex.Message; }
                 if (problem != null)
-                    problem = "Hearth cannot write to this folder: " + problem +
-                              " — Give the IIS application pool identity \"Modify\" permission on it (own server: icacls \"" + rootFull +
-                              "\" /grant \"IIS AppPool\\<pool name>:(OI)(CI)M\"; shared hosting: set write permission in the hosting control panel).";
+                {
+                    // Windows error texts contain the full path; never show it (it may come from config.json)
+                    problem = problem.Replace(rootFull, AppConfig.DisplayPath(rootFull));
+                    problem = "Hearth cannot write to this folder (" + problem + "). Ask the server administrator to give the IIS " +
+                              "application pool identity \"Modify\" permission on it (shared hosting: set write permission in the hosting control panel).";
+                }
             }
             string rootDisplay = HttpUtility.HtmlEncode(AppConfig.DisplayPath(rootFull));
             string banner = problem == null ? "" :
                 $"<div class='fm-banner'><i class='fa-solid fa-triangle-exclamation'></i><div><b>{rootDisplay}</b><br />{HttpUtility.HtmlEncode(problem)}</div></div>";
+
+            string effectiveWidth = AppConfig.EffectiveFilesWidth(AppSession.LoginUser);
+            string fmStyle = effectiveWidth == "100%" ? "" : $" style='--fm-max-w:{HttpUtility.HtmlAttributeEncode(effectiveWidth)}'";
+            FileTask activeTask = FileTaskManager.LatestForUser(AppSession.LoginUser?.Username);
 
             var pt = new PageTemplate { Title = "My Files", BodyClass = "page-files", ActiveMenu = "files" };
             pt.ExtraHeaderText = StaticAsset.Css("/css/files.css") + "\n" + StaticAsset.Css("/css/components/hearth-editor.css");
@@ -38,13 +45,17 @@ namespace HearthFileManager.RH
                 ChunkBytes,
                 CanEdit = AppSession.LoginUser.Has(Perm.Files),
                 SitePreviewUrl = cfg.SitePreviewUrl,
-                RootDisplay = AppConfig.DisplayPath(rootFull)
+                RootDisplay = AppConfig.DisplayPath(rootFull),
+                FilesWidth = effectiveWidth,
+                UserFilesWidth = AppConfig.NormalizeFilesWidth(AppSession.LoginUser?.FilesWidth, true),
+                SystemFilesWidth = AppConfig.NormalizeFilesWidth(cfg.FilesWidth, false),
+                ActiveTask = activeTask?.ToDto()
             }) + "\n" + StaticAsset.Script("/js/components/hearth-editor.js") + "\n" + StaticAsset.Script("/js/files.js");
 
             var sb = new StringBuilder();
             sb.Append(pt.GenerateHtmlHeader());
             sb.Append($@"
-<div class='fm' id='fm'>
+<div class='fm' id='fm'{fmStyle}>
     {banner}
     <header class='fm-header'>
         <nav class='breadcrumb' id='fm-breadcrumb' title='{rootDisplay}'></nav>
@@ -78,6 +89,12 @@ namespace HearthFileManager.RH
             <button type='button' class='btn btn-danger-ghost' data-act='delete'><i class='fa-solid fa-trash-can'></i><span>Delete</span></button>
         </div>
         <div class='tb-spacer'></div>
+        <div class='width-toggle' id='width-toggle' role='group' aria-label='Center display width' title='Center display width'>
+            <i class='fa-solid fa-arrows-left-right-to-line wt-icon'></i>
+            <button type='button' class='btn-width' data-width='100%' title='Full width (100%)'>100%</button>
+            <button type='button' class='btn-width' data-width='900px' title='Max width 900px'>900px</button>
+            <button type='button' class='btn-width' data-width='custom' id='btn-width-custom' title='Custom max width…'>Custom</button>
+        </div>
         <div class='view-toggle' role='group' aria-label='View'>
             <button type='button' class='btn-icon' data-view='list' title='List view'><i class='fa-solid fa-list'></i></button>
             <button type='button' class='btn-icon' data-view='grid' title='Grid view'><i class='fa-solid fa-table-cells-large'></i></button>
@@ -90,6 +107,24 @@ namespace HearthFileManager.RH
             <div><i class='fa-solid fa-cloud-arrow-up'></i><p>Drop files or folders to upload</p><small id='drop-target'></small></div>
         </div>
     </section>
+
+    <footer class='fm-taskbar' id='fm-taskbar' hidden>
+        <div class='taskbar-row'>
+            <div class='taskbar-info'>
+                <span class='taskbar-icon' id='task-icon'></span>
+                <div class='taskbar-text'>
+                    <div class='taskbar-title' id='task-title'></div>
+                    <div class='taskbar-meta' id='task-meta'></div>
+                </div>
+            </div>
+            <div class='taskbar-actions'>
+                <span class='taskbar-pct' id='task-pct'></span>
+                <button type='button' class='btn btn-sm btn-danger-ghost' id='task-cancel' hidden><i class='fa-solid fa-stop'></i><span>Cancel</span></button>
+                <button type='button' class='btn btn-sm' id='task-close' hidden><i class='fa-solid fa-xmark'></i><span>Close</span></button>
+            </div>
+        </div>
+        <div class='taskbar-bar'><span id='task-bar'></span></div>
+    </footer>
 </div>
 
 <input type='file' id='fm-file-input' multiple hidden />
