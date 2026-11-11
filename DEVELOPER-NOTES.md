@@ -40,6 +40,26 @@ tests/
    `MaxUploadMb` in config.json (default 500).
 6. First login is `admin` / `admin` unless config.json already has users – change it on the Users page.
 
+## Deploy API (/api/v1) for scripts and AI agents
+
+- Users with the **Use API access tokens** permission (`Perm.Api`) create tokens on **My Account**. A token is
+  shown once; `App_Data/api-tokens.json` keeps only its SHA-256 (`engine/ApiTokens.cs`).
+- `RH/ApiV1.cs` handles `whoami`, `list`, `upload`, `delete`, `help`. It is routed in `Global.asax.cs` *before*
+  the cookie/DevAutoLogin code: the only credential it accepts is `Authorization: Bearer hfm_...`.
+- A token acts as its user (`FsService.ForUser`): same root folder. Uploading or deleting also needs a
+  read & write token and the user's **Manage files** permission.
+- Upload = a zip in the request body, extracted with `FsService.UnzipFile` (zip-slip safe, replaced files go to
+  the recycle bin, total size capped by `ApiMaxExtractMb`). Zips larger than one request (16 MB in web.config)
+  are sent in parts with `uploadId`/`index`/`total`.
+- `list` takes `exclude=uploads,storage/receipts` for folders that only matter on the live server (customer
+  uploads, receipts). No slash = a folder name at any depth; with a slash = a path from the root; `*` is a
+  wildcard. Excluded folders are returned once with `Excluded: true` and are not entered or hashed.
+- API deletes always go to the recycle bin; the API cannot read or empty it.
+- Every call is appended to `App_Data/api-log.jsonl` (rotated at 5 MB).
+- `GET /api/v1/help` (and the "Copy instructions for AI" button) returns the full guide for an agent.
+- `tools/hearth-deploy.ps1` is a ready-made client: compare by hash, zip the changes, upload, verify.
+- Tests: `tests/test-api.ps1` (steps to start the sandbox site are at the top of the file).
+
 ## Gemini free tier notes (measured on this key, Oct 2026)
 
 - Free daily quota is **per model** and small (e.g. 20 requests/day for `gemini-3.5-flash`).

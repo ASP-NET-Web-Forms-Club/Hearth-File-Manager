@@ -16,12 +16,47 @@ namespace HearthFileManager.RH
                 switch (action)
                 {
                     case "change-password": Guard.Mutating(); ChangePassword(); break;
+                    case "token-list": Guard.Require(Perm.Api); TokenList(); break;
+                    case "token-create": Guard.Mutating(Perm.Api); TokenCreate(); break;
+                    case "token-revoke": Guard.Mutating(Perm.Api); TokenRevoke(); break;
                     default: ApiHelper.WriteError($"Unknown action: {action}", 400); break;
                 }
             }
             catch (GuardException gx) { ApiHelper.WriteError(gx.Message, gx.StatusCode); }
             catch (Exception ex) { ApiHelper.WriteError("An error occurred: " + ex.Message, 500); }
             ApiHelper.EndResponse();
+        }
+
+        // ---- access tokens for the deploy API (/api/v1). Only the owner sees and manages their tokens. ----
+
+        static object TokenDto(obApiToken t) => new { t.Id, t.Name, t.Prefix, t.CanWrite, t.CreatedUtc, t.ExpiresUtc, t.LastUsedUtc, Expired = t.IsExpired };
+
+        static void TokenList()
+        {
+            var items = new System.Collections.Generic.List<object>();
+            foreach (obApiToken t in ApiTokens.ListFor(AppSession.LoginUser.Username)) items.Add(TokenDto(t));
+            ApiHelper.WriteJson(new { success = true, message = "Success", items, data = new { Help = ApiV1.HelpText(ApiHelper.GetBaseUrl()) } });
+        }
+
+        static void TokenCreate()
+        {
+            obUser me = AppSession.LoginUser;
+            bool canWrite = Req.Form["canWrite"] == "1";
+            if (canWrite && !me.Has(Perm.Files)) { ApiHelper.WriteError("You need the \"Manage files\" permission for a read & write token."); return; }
+            int days;
+            int.TryParse(Req.Form["days"], out days);
+            if (days < 0 || days > 3650) days = 0;
+
+            string plain;
+            obApiToken t = ApiTokens.Create(me.Username, Req.Form["name"], canWrite, days, out plain);
+            // the plain token leaves the server exactly once, here
+            ApiHelper.WriteSuccess("Token created", new { Token = plain, Info = TokenDto(t) });
+        }
+
+        static void TokenRevoke()
+        {
+            if (!ApiTokens.Revoke(AppSession.LoginUser.Username, Req.Form["id"] + "")) { ApiHelper.WriteError("Token not found.", 404); return; }
+            ApiHelper.WriteSuccess("Token revoked");
         }
 
         /// <summary>Every user may change their own password, but must prove the current one.</summary>

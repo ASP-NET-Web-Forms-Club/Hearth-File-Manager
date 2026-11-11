@@ -16,7 +16,9 @@ namespace HearthFileManager.engine
         public const string Settings = "settings";  // Gemini key/model, upload limit, site address
         public const string Users = "users";        // add/delete users, reset passwords, assign permissions
 
-        public static readonly string[] All = { Files, Ai, Settings, Users };
+        public const string Api = "api";            // create access tokens for the /api/v1 deploy API (scripts, AI agents)
+
+        public static readonly string[] All = { Files, Ai, Settings, Users, Api };
         public static readonly string[] NewUserDefault = { Files, Ai };
 
         /// <summary>Removes unknown keys, de-duplicates, and adds Files when Ai is present.</summary>
@@ -62,6 +64,8 @@ namespace HearthFileManager.engine
         [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
         public List<string> GeminiFallbackModels { get; set; } = new List<string> { "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash" };
         public int MaxUploadMb { get; set; } = 500;
+        /// <summary>Deploy API: largest total size (MB) one uploaded zip may extract to. Stops "zip bombs".</summary>
+        public int ApiMaxExtractMb { get; set; } = 2000;
         /// <summary>
         /// Main root folder that Hearth manages (the public website). "/App_Data/public" is relative to the
         /// Hearth folder; absolute paths such as "D:\websites\" or "C:\inetpub\wwwroot" are allowed.

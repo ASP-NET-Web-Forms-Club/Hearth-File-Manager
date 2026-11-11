@@ -265,6 +265,16 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .perm-list li.yes i { color: var(--ok); }
 .perm-list li.no { color: var(--text-3); }
 .perm-list li.note { color: var(--text-2); font-size: 13px; padding-top: 12px; }
+/* ---------- access tokens (My Account) ---------- */
+.token-card { margin-top: 20px; overflow-x: auto; }
+.token-card .card-head { flex-wrap: wrap; gap: 10px; }
+.token-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.token-intro { color: var(--text-2); font-size: 14px; margin: 4px 0 12px; }
+.token-warn { color: var(--danger); background: var(--danger-soft); border-radius: var(--radius-sm); padding: 8px 12px; font-size: 14px; }
+.token-empty { color: var(--text-3); text-align: center; }
+.token-expired { color: var(--danger); }
+.token-secret { font-family: Consolas, Menlo, monospace; font-size: 13px; }
+.token-once { font-size: 13px; margin-top: 10px; }
 .perm-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .perm-tag { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--surface-2); color: var(--text-2); white-space: nowrap; }
 .perm-tag.on { background: var(--ok-soft); color: var(--ok); }
