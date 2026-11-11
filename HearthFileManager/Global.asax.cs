@@ -22,6 +22,9 @@ namespace HearthFileManager
             // static assets: let IIS serve them without session work
             if (path.StartsWith("/css/") || path.StartsWith("/js/") || path.StartsWith("/assets/")) return;
 
+            // deploy API: token-only, routed before any cookie / auto-login handling
+            if (path.StartsWith("/api/v1/")) { RH.ApiV1.HandleRequest(path.Substring("/api/v1/".Length)); return; }
+
             AppSession.TryRestoreFromCookie();
 
             switch (path)

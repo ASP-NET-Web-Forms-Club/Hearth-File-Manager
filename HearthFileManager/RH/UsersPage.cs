@@ -19,7 +19,8 @@ namespace HearthFileManager.RH
                     new { Key = Perm.Files, Label = AccountPage.PermLabels[Perm.Files], Hint = "Upload, edit, rename, move, delete, zip. Without it: view and download only." },
                     new { Key = Perm.Ai, Label = AccountPage.PermLabels[Perm.Ai], Hint = "Chat with Gemini to build the website (uses the API key, which may cost money). Includes Manage files." },
                     new { Key = Perm.Settings, Label = AccountPage.PermLabels[Perm.Settings], Hint = "Gemini API key and model, upload limit, website address." },
-                    new { Key = Perm.Users, Label = AccountPage.PermLabels[Perm.Users], Hint = "Add and delete users, reset passwords, change permissions." }
+                    new { Key = Perm.Users, Label = AccountPage.PermLabels[Perm.Users], Hint = "Add and delete users, reset passwords, change permissions." },
+                    new { Key = Perm.Api, Label = AccountPage.PermLabels[Perm.Api], Hint = "Create access tokens so scripts and AI agents can list and upload files through the API." }
                 },
                 Defaults = Perm.NewUserDefault
             })

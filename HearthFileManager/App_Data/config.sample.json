@@ -19,6 +19,7 @@
     "gemini-3.5-flash"
   ],
   "MaxUploadMb": 500,
+  "ApiMaxExtractMb": 2000,
   "SiteRoot": "/App_Data/public",
   "SitePreviewUrl": "",
   "DevAutoLogin": false

@@ -241,6 +241,95 @@ namespace HearthFileManager.engine
             return item;
         }
 
+        /// <summary>Flat listing for the deploy API: paths relative to the root, optional SHA-256 per file.</summary>
+        public class obTreeEntry
+        {
+            public string Path { get; set; }
+            public bool IsDir { get; set; }
+            public long Size { get; set; }
+            public DateTime ModifiedUtc { get; set; }
+            /// <summary>Lower-case hex; null for folders, when not requested, or when the file could not be read.</summary>
+            [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+            public string Sha256 { get; set; }
+            /// <summary>true = this folder matched an exclude pattern: it exists, but its contents were not listed.</summary>
+            [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public bool Excluded { get; set; }
+        }
+
+        /// <summary>
+        /// Turns folder exclude patterns into matchers (case-insensitive, "*" = any characters except "/").
+        ///   "uploads"          no slash  → any folder with that name, at any depth
+        ///   "storage/receipts" has slash → that exact folder, relative to the root
+        ///   "cache-*", "sites/*/tmp"     → wildcards work in both forms
+        /// </summary>
+        public static List<Regex> CompileExcludes(IEnumerable<string> patterns)
+        {
+            var list = new List<Regex>();
+            foreach (string raw in patterns ?? new string[0])
+            {
+                string p = NormalizeRel(raw);
+                if (p.Length == 0) continue;
+                if (p.Length > 260 || list.Count >= 100) throw new FsException("Too many or too long exclude patterns (at most 100).");
+                string body = Regex.Escape(p).Replace("\\*", "[^/]*");
+                // without a slash the pattern is matched against the last path segment only
+                string rx = p.IndexOf('/') >= 0 ? "^" + body + "$" : "(^|/)" + body + "$";
+                list.Add(new Regex(rx, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// Lists a folder, optionally with all sub-folders. The recycle bin is never included.
+        /// Folders matching excludeFolders are reported (Excluded = true) but not entered or hashed.
+        /// </summary>
+        public List<obTreeEntry> ListTree(string rel, bool recursive, bool hash, int maxItems, IEnumerable<string> excludeFolders = null)
+        {
+            if (IsInRecycle(rel)) throw new FsException("The recycle bin is not available through the API.");
+            string full = Resolve(rel);
+            if (!Directory.Exists(full)) throw new FsException("Folder not found: " + NormalizeRel(rel));
+            var list = new List<obTreeEntry>();
+            WalkTree(new DirectoryInfo(full), recursive, hash, maxItems, list, CompileExcludes(excludeFolders));
+            return list;
+        }
+
+        void WalkTree(DirectoryInfo dir, bool recursive, bool hash, int maxItems, List<obTreeEntry> list, List<Regex> excludes)
+        {
+            FileInfo[] files = dir.GetFiles();
+            Array.Sort(files, (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+            foreach (FileInfo f in files)
+            {
+                if (list.Count >= maxItems) throw new FsException($"More than {maxItems} items. List a sub-folder instead.");
+                list.Add(new obTreeEntry { Path = ToRel(f.FullName), Size = f.Length, ModifiedUtc = f.LastWriteTimeUtc, Sha256 = hash ? HashFile(f.FullName) : null });
+            }
+            DirectoryInfo[] dirs = dir.GetDirectories();
+            Array.Sort(dirs, (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+            foreach (DirectoryInfo d in dirs)
+            {
+                if (list.Count >= maxItems) throw new FsException($"More than {maxItems} items. List a sub-folder instead.");
+                string dRel = ToRel(d.FullName);
+                bool excluded = excludes.Exists(rx => rx.IsMatch(dRel));
+                list.Add(new obTreeEntry { Path = dRel, IsDir = true, ModifiedUtc = d.LastWriteTimeUtc, Excluded = excluded });
+                // never follow junctions / symlinks: they can point outside the root or loop
+                if (recursive && !excluded && (d.Attributes & FileAttributes.ReparsePoint) == 0) WalkTree(d, true, hash, maxItems, list, excludes);
+            }
+        }
+
+        public static string HashFile(string full)
+        {
+            try
+            {
+                using (var sha = System.Security.Cryptography.SHA256.Create())
+                using (var fs = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    var sb = new StringBuilder(64);
+                    foreach (byte b in sha.ComputeHash(fs)) sb.Append(b.ToString("x2"));
+                    return sb.ToString();
+                }
+            }
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+        }
+
         public bool Exists(string rel)
         {
             string full = Resolve(rel);
@@ -652,8 +741,21 @@ namespace HearthFileManager.engine
         {
             string zipFull = Resolve(zipRel);
             if (!File.Exists(zipFull)) throw new FsException("Zip file not found: " + zipRel);
+            return UnzipFile(zipFull, destFolderRel, prog, ct);
+        }
+
+        /// <summary>
+        /// Extracts a zip from anywhere on disk (e.g. an API upload in App_Data/tmp) into destFolderRel.
+        /// maxTotalBytes > 0 limits the extracted size; "written" receives the relative path of every file.
+        /// </summary>
+        public int UnzipFile(string zipFull, string destFolderRel, obZipProgress prog = null, CancellationToken ct = default(CancellationToken),
+                             long maxTotalBytes = 0, string actor = "unzip", List<string> written = null)
+        {
             string destFull = Resolve(destFolderRel);
             Directory.CreateDirectory(destFull);
+            bool destInRecycle = IsInRecycle(destFolderRel);
+            long extracted = 0;
+            string tooBig = $"The zip extracts to more than the {maxTotalBytes / 1024 / 1024} MB limit.";
 
             int count = 0;
             string partialFile = null;
@@ -675,16 +777,23 @@ namespace HearthFileManager.engine
                         prog.TotalFiles = tf;
                         prog.TotalBytes = tb;
                     }
+                    if (maxTotalBytes > 0)
+                    {
+                        long declared = 0;
+                        foreach (ZipArchiveEntry e in zip.Entries) declared += e.Length;
+                        if (declared > maxTotalBytes) throw new FsException(tooBig);
+                    }
 
                     foreach (ZipArchiveEntry entry in zip.Entries)
                     {
                         ct.ThrowIfCancellationRequested();
                         string entryRel = Combine(destFolderRel, entry.FullName);
+                        if (!destInRecycle && IsInRecycle(entryRel)) throw new FsException("The zip contains a path that is not allowed: " + entry.FullName);
                         string target = Resolve(entryRel); // throws on ../ escape
                         if (entry.FullName.EndsWith("/") || entry.FullName.EndsWith("\\")) { Directory.CreateDirectory(target); continue; }
                         if (IsSystemFolder(entryRel)) continue;
                         if (Directory.Exists(target)) throw new FsException("A folder blocks extraction of " + entry.FullName);
-                        if (File.Exists(target)) Delete(entryRel, "unzip");
+                        if (File.Exists(target)) Delete(entryRel, actor);
                         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(target));
 
                         if (prog != null) prog.CurrentFile = entry.FullName;
@@ -696,12 +805,16 @@ namespace HearthFileManager.engine
                             while ((read = src.Read(buf, 0, buf.Length)) > 0)
                             {
                                 ct.ThrowIfCancellationRequested();
+                                // counted while writing: the sizes declared in a zip's headers can lie
+                                extracted += read;
+                                if (maxTotalBytes > 0 && extracted > maxTotalBytes) throw new FsException(tooBig);
                                 dst.Write(buf, 0, read);
                                 if (prog != null) Interlocked.Add(ref prog.DoneBytes, read);
                             }
                         }
                         try { File.SetLastWriteTimeUtc(target, entry.LastWriteTime.UtcDateTime); } catch { }
                         partialFile = null;
+                        if (written != null) written.Add(NormalizeRel(entryRel));
                         count++;
                         if (prog != null) Interlocked.Increment(ref prog.DoneFiles);
                     }

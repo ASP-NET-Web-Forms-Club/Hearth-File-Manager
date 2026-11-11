@@ -142,6 +142,7 @@ namespace HearthFileManager.RH
             if (u.Has(Perm.Users) && !AnotherManagerExists(u.Username)) { ApiHelper.WriteError("At least one user must keep the \"Manage users\" permission."); return; }
             AppConfig.Update(c => c.Users.RemoveAll(x => x.Username == u.Username));
             AppSession.RevokeUser(u.Username);
+            ApiTokens.RevokeUser(u.Username);
             ApiHelper.WriteSuccess("User deleted");
         }
 
