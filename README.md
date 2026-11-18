@@ -18,7 +18,7 @@ Give a client (or yourself) a friendly place to manage a website's files on an I
 - Built-in **text / code editor** (HTML, CSS, JS, PHP…) with line numbers and Ctrl+S
 - **Recycle bin**: deleted items can be restored to their original location
 - **Multi-user with permissions**: per user, tick *Manage files* (without it the user is view & download only),
-  *Use AI website builder*, *Manage settings* and *Manage users*. Everyone can change their own password on *My Account*.
+  *Use AI website builder*, *Manage settings*, *Manage users* and *Use API access tokens*. Everyone can change their own password on *My Account*.
   Lock-out protection: you can't delete yourself or remove your own *Manage users*, and one user must always keep it
 - **Per-user root folders**: give each user their own sub-folder (e.g. one site per client); they only see and change that folder.
   Server folders outside Hearth can be assigned by the administrator in `config.json`, and are shown masked in the browser
@@ -40,6 +40,38 @@ Give a client (or yourself) a friendly place to manage a website's files on an I
 - **Conversation history is stored in the browser (IndexedDB)**, so nothing is kept on your server except short-lived undo snapshots
 
 > RPM = requests per minute, RPD = requests per day.
+
+### Deploy API for scripts and AI agents
+Let a script, or an AI coding agent such as Claude, publish the website you build on your own computer: it compares
+files, zips only what changed, and uploads it. No password is involved.
+
+![Access tokens on My Account](wiki/screenshot-my-account.png)
+
+- **Personal access tokens** on *My Account* (needs the *Use API access tokens* permission): read-only or read & write,
+  with an expiry date. A token is shown once; Hearth stores only its SHA-256 fingerprint. Revoke it at any time.
+- A token acts as its user: same root folder and the same *Manage files* permission.
+- Send it as `Authorization: Bearer hfm_...` to `/api/v1/`:
+
+  | Endpoint | What it does |
+  |---|---|
+  | `GET whoami` | Token check: user, access, upload limits |
+  | `GET list?path=&recursive=1&hash=1&exclude=uploads` | Files and folders with size, last-modified date and optional SHA-256 |
+  | `POST upload?path=` | Upload a zip (body); it is extracted into the folder. Large zips go in parts |
+  | `POST delete` | `{"paths":[...]}`: move files or folders to the recycle bin |
+  | `GET help` | The full guide for an AI agent (also the *Copy instructions for AI* button) |
+
+- **Exclude folders** that only matter on the live server (customer uploads, receipts):
+  `exclude=uploads,storage/receipts`. A name without a slash matches at any depth; `*` is a wildcard.
+- Safe by design: replaced and deleted files go to the **recycle bin**, uploads can't escape the folder (zip-slip safe),
+  the API can't read or empty the recycle bin, and every call is logged to `App_Data/api-log.jsonl`.
+- Ready-made client: [`tools/hearth-deploy.ps1`](tools/hearth-deploy.ps1)
+
+  ```powershell
+  $env:HEARTH_TOKEN = '<paste token>'
+  .\tools\hearth-deploy.ps1 -BaseUrl https://files.example.com -LocalDir C:\sites\shop -ExcludeFolders uploads -DeleteRemoved -DryRun
+  ```
+
+> Use the API over **HTTPS** only: the token travels in every request.
 
 ---
 
@@ -194,13 +226,14 @@ Main reference: [adriancs.com](https://adriancs.com/complete-architecture-refere
 - System fonts only, and a **self-hosted Font Awesome**: no external CDN or font downloads
 
 ```
-engine/            AppConfig, AppSession, Guard, PageTemplate, FsService
+engine/            AppConfig, AppSession, Guard, PageTemplate, FsService, ApiTokens
 engine/Ai/         GeminiAgent (function-calling loop, rate limiter, model fallback),
                    AiTools (tools exposed to Gemini), AiUndo, AiTaskManager
-RH/                page + API handlers
+RH/                page + API handlers (ApiV1.cs = the token-based deploy API)
 js/, css/          site, page and component scripts/styles
 js/components/     hearth-editor.js (HearthEditor.open(path)), hearth-store.js (IndexedDB)
-tests/             PowerShell scripts that drive the compiled DLL directly
+tests/             PowerShell scripts that drive the compiled DLL directly (test-api.ps1: the deploy API)
+tools/             hearth-deploy.ps1, the deploy API client
 ```
 
 More implementation notes: [DEVELOPER-NOTES.md](DEVELOPER-NOTES.md).
