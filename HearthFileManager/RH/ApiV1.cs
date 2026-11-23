@@ -270,10 +270,18 @@ ENDPOINTS
   GET  /api/v1/whoami
        Checks the token. data: User, TokenName, CanWrite, ExpiresUtc, MaxUploadMb, MaxRequestBytes.
 
-  GET  /api/v1/list?path=<folder>&recursive=1&hash=1&exclude=<folders>
-       Lists files and folders. items: Path, IsDir, Size, ModifiedUtc (UTC, ISO 8601), Sha256.
-       recursive=1 includes all sub-folders. hash=1 adds the SHA-256 (lower-case hex) of each file.
-       Compare by Sha256, not by date: dates change when files are copied or zipped.
+  GET  /api/v1/list?path=<folder>&recursive=1&exclude=<folders>
+       Lists files and folders. items: Path, IsDir, Size, ModifiedUtc (UTC, ISO 8601).
+       recursive=1 includes all sub-folders.
+       Finding changed files (default: quick compare, hash=0):
+         A file is changed when its Size differs, or its ModifiedUtc differs from the local file's
+         last-modified time (UTC) by more than 2 seconds (zip stores times in 2-second steps).
+         The upload keeps each file's modified time from the zip, so build the zip with the local
+         files' original modified times (do not stamp entries with the current time).
+       hash=1 (optional, slower): also returns Sha256 (lower-case hex) of each file. The server reads
+         every file in full, so use it only when you need exact certainty: e.g. the dates cannot be
+         trusted, the quick compare looks wrong, or the user asks for a full verification.
+         Combine it with exclude= and a narrow path= to keep it fast.
        exclude=<folders> skips folders that only matter on the live server (customer uploads, receipts,
        caches). Comma-separated, case-insensitive, ""*"" is a wildcard:
          exclude=uploads            any folder named ""uploads"", at any depth
@@ -303,8 +311,9 @@ POWERSHELL EXAMPLE (Windows PowerShell 5.1 or newer)
   $base = '{baseUrl}/api/v1'
   $h = @{{ Authorization = ""Bearer $env:HEARTH_TOKEN"" }}
   # 1. what is on the server?
-  $remote = (Invoke-RestMethod ""$base/list?path=&recursive=1&hash=1"" -Headers $h).items
-  # 2. zip the changed files into deploy.zip (keep their relative paths inside the zip), then:
+  $remote = (Invoke-RestMethod ""$base/list?path=&recursive=1"" -Headers $h).items
+  # 2. zip the changed files (Size differs, or ModifiedUtc differs by more than 2 seconds) into
+  #    deploy.zip, keeping their relative paths and original modified times inside the zip, then:
   Invoke-RestMethod ""$base/upload?path="" -Method Post -Headers $h -InFile deploy.zip -ContentType 'application/zip'
   # 3. remove files that no longer exist locally
   $body = @{{ paths = @('old-page.php') }} | ConvertTo-Json
@@ -314,7 +323,8 @@ RULES FOR AI AGENTS
   - Call /whoami first. If CanWrite is false, you can only list.
   - Upload only what changed. Do not upload secrets, .git folders or local config files.
   - Tell the user which files you are about to upload or delete before doing it.
-  - After uploading, list again and confirm the hashes match.
+  - After uploading, list again and confirm Size and ModifiedUtc match (use hash=1 only if exact
+    proof is needed).
 ";
         }
     }
